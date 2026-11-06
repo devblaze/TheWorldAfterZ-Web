@@ -18,12 +18,12 @@ const features: Feature[] = [
   {
     title: "Dark nights",
     body: "Night is really dark. Lamps, fires, flashlights and lit windows are what let you see.",
-    shot: screen("night-street"),
+    shot: screen("street-night"),
   },
   {
     title: "Health, hunger, thirst",
     body: "Keep all three up. The HUD also tracks your body temperature against how cold it feels outside.",
-    shot: screen("walker-at-car"),
+    shot: screen("horde-closing"),
   },
   {
     title: "Four seasons",
@@ -42,7 +42,7 @@ const features: Feature[] = [
   },
 ];
 
-const hero = screen("main-street");
+const hero = screen("street-dusk");
 
 export default function Home() {
   return (
@@ -96,7 +96,7 @@ export default function Home() {
       <section aria-labelledby="gallery" className="space-y-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="gallery" className="text-3xl font-black uppercase tracking-widest text-amber-500">From the build</h2>
-          <p className="text-sm text-stone-500">Early alpha captures. Work in progress.</p>
+          <p className="text-sm text-stone-500">Clean captures from the current build. Work in progress.</p>
         </div>
         <Gallery items={screens} />
       </section>
