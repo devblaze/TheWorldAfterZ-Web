@@ -30,12 +30,14 @@ model User {
   role            Role      @default(PLAYER)
   createdAt       DateTime  @default(now())
   emailVerifiedAt DateTime?
+  passwordChangedAt DateTime? // sessions issued before this are rejected
 
-  redemptions        Redemption[]
-  downloadEvents     DownloadEvent[]
-  auditLogs          AuditLog[]
-  mintedKeys         AccessKey[]
-  verificationTokens EmailVerificationToken[]
+  redemptions         Redemption[]
+  downloadEvents      DownloadEvent[]
+  auditLogs           AuditLog[]
+  mintedKeys          AccessKey[]
+  verificationTokens  EmailVerificationToken[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model AccessKey {
@@ -93,6 +95,18 @@ model AuditLog {
 }
 
 model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique // sha256 hex
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
   id        String    @id @default(cuid())
   tokenHash String    @unique // sha256 hex
   userId    String
