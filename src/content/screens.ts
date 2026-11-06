@@ -20,6 +20,11 @@ export const screens: Screen[] = [
     "A horde closing in",
   ),
   s(
+    "hud-vitals",
+    "First-person view down a dusk street toward distant zombies, pistol in hand, with health, stamina, hunger, thirst and body temperature gauges and the weapon hotbar along the bottom",
+    "The survival HUD",
+  ),
+  s(
     "zombie-closeup",
     "Close-up of a bald zombie in a torn dark shirt and shredded pants, lit from the side against a black background",
     "One of the dead, up close",
