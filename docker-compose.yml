@@ -25,6 +25,9 @@ services:
       LAUNCHER_DIR: /launcher
       AUTH_URL: ${AUTH_URL:-https://theworldafterz.ncatechsolutions.org}
       AUTH_TRUST_HOST: "true"
+      # Fail the deploy, not every login, when a secret is missing (Auth.js returns "server configuration" 500s).
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET (openssl rand -base64 32)}
+      DOWNLOAD_SIGNING_SECRET: ${DOWNLOAD_SIGNING_SECRET:?set DOWNLOAD_SIGNING_SECRET (openssl rand -base64 32)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-nikosantoniadis94@gmail.com}
     depends_on:
       db:

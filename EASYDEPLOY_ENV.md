@@ -14,7 +14,9 @@ SMTP_FROM=TheWorldAfterZ <noreply@ncatechsolutions.org>
 
 ## Secret (do not commit)
 SMTP_PASS=<Resend API key TheWorldAfterZ-Web — only in /home/box/.secrets/resend_twaz_web_api_key on Lead's box; paste into EasyDeploy env>
-# Also set APP auth/session secrets, DATABASE_URL, etc. per README.
+AUTH_SECRET=<openssl rand -base64 32>              # required: without it every sign-in returns "server configuration" 500
+DOWNLOAD_SIGNING_SECRET=<openssl rand -base64 32>  # required for launcher download links
+# docker-compose.yml refuses to start if either is missing. Also set POSTGRES_PASSWORD etc. per README.
 
 ## Cloudflare note
 Confirm EasyDeploy forwards CF-Connecting-IP or X-Forwarded-For for rate limits.
