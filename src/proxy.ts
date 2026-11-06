@@ -6,7 +6,10 @@ export function proxy(request: NextRequest) {
   // CSRF defence for our own JSON/form APIs (Auth.js and server actions check this themselves).
   if (request.method !== "GET" && request.method !== "HEAD" && pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
     const expected = process.env.AUTH_URL ? new URL(process.env.AUTH_URL).origin : request.nextUrl.origin;
-    if (request.headers.get("origin") !== expected) return new NextResponse("Forbidden", { status: 403 });
+    const origin = request.headers.get("origin");
+    // Some referrer policies make browsers send "Origin: null"; Sec-Fetch-Site can't be set by pages, so trust it then.
+    const sameSite = origin === "null" && request.headers.get("sec-fetch-site") === "same-origin";
+    if (origin !== expected && !sameSite) return new NextResponse("Forbidden", { status: 403 });
   }
 
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { button, Card, Field, Notice, one, type SearchParams } from "@/components/ui";
 
 // The URL carries the reset token: send no Referer at all from this page (site default only strips cross-origin paths).
-export const metadata: Metadata = { referrer: "no-referrer" };
+export const metadata: Metadata = { referrer: "same-origin" };
 
 const errors: Record<string, string> = {
   invalid: "Passwords must match and be at least 10 characters.",
