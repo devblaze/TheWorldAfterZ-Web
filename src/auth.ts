@@ -33,14 +33,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           await prisma.user.update({ where: { id: user.id }, data: { role: "ADMIN" } });
           await prisma.auditLog.create({ data: { actorId: user.id, action: "ADMIN_PROMOTED", targetId: user.id } });
         }
-        return { id: user.id, email: user.email };
+        return { id: user.id, email: user.email, pwdAt: user.passwordChangedAt?.getTime() ?? 0 };
       },
     }),
   ],
   callbacks: {
+    jwt({ token, user }) {
+      // Snapshot of passwordChangedAt at sign-in; currentUser() rejects the token once it moves on.
+      if (user) token.pwdAt = user.pwdAt ?? 0;
+      return token;
+    },
     session({ session, token }) {
       if (token.sub) session.user.id = token.sub;
+      session.issuedPwdAt = typeof token.pwdAt === "number" ? token.pwdAt : 0;
       return session;
     },
   },
 });
+
+declare module "next-auth" {
+  interface User {
+    pwdAt?: number;
+  }
+  interface Session {
+    issuedPwdAt?: number;
+  }
+}

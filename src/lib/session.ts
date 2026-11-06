@@ -11,7 +11,10 @@ export async function currentUser() {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
-  return prisma.user.findUnique({ where: { id } });
+  const user = await prisma.user.findUnique({ where: { id } });
+  // A password reset signs out every session issued before it.
+  if (user?.passwordChangedAt && (session.issuedPwdAt ?? 0) < user.passwordChangedAt.getTime()) return null;
+  return user;
 }
 
 export async function requireUserPage() {

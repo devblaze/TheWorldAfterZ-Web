@@ -32,7 +32,13 @@ export const LIMITS = {
   register: { ip: 5, account: 3, windowMs: HOUR },
   redeem: { ip: 10, account: 5, windowMs: MIN15 },
   resend: { ip: 5, account: 3, windowMs: HOUR },
+  forgot: { ip: 5, account: 3, windowMs: HOUR },
 } as const;
+
+/** Per-IP only, for actions with no account identifier (the reset token is the secret). */
+export const IP_LIMITS = { reset: { ip: 10, windowMs: MIN15 } } as const;
+export const limitIp = (action: keyof typeof IP_LIMITS, ip: string) =>
+  rateLimit(`${action}:ip:${ip}`, IP_LIMITS[action].ip, IP_LIMITS[action].windowMs);
 
 /** Per-IP and per-account check; both counters are always incremented. */
 export async function limitBoth(action: keyof typeof LIMITS, ip: string, account: string) {
