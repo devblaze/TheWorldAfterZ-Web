@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    container:
+      image: node:22
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: twaz
+          POSTGRES_PASSWORD: twaz-ci
+          POSTGRES_DB: twaz_ci
+        options: >-
+          --health-cmd "pg_isready -U twaz -d twaz_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    # Dummy values for CI only. Never put real secrets here.
+    env:
+      DATABASE_URL: postgresql://twaz:twaz-ci@postgres:5432/twaz_ci?schema=public
+      AUTH_SECRET: ci-dummy-auth-secret-not-a-real-value-000000
+      AUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
+      DOWNLOAD_SIGNING_SECRET: ci-dummy-download-secret-000000
+      LAUNCHER_DIR: ./deploy/launcher-example
+      SMTP_HOST: ""
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma validate
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+      - name: Integration tests
+        run: npm run test:integration
+      - run: npm run build
