@@ -22,6 +22,8 @@ RUN npm install -g prisma@6.19.3 && npm cache clean --force
 RUN groupadd --system --gid 1001 app && useradd --system --uid 1001 --gid app app && mkdir -p /launcher && chown app:app /launcher
 COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
+# standalone server.js serves public/ only if it sits next to it (screenshots, next/image sources).
+COPY --from=build --chown=app:app /app/public ./public
 COPY --from=build --chown=app:app /app/prisma ./prisma
 COPY --from=build --chown=app:app /app/scripts ./scripts
 USER app
