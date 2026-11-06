@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: twaz
+      POSTGRES_DB: twaz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U twaz -d twaz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://twaz:${POSTGRES_PASSWORD}@db:5432/twaz?schema=public
+      LAUNCHER_DIR: /launcher
+    depends_on:
+      db:
+        condition: service_healthy
+    # Only reachable from the host; the existing HTTPS reverse proxy forwards to it.
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - launcher:/launcher:ro
+
+volumes:
+  pgdata:
+  launcher:
