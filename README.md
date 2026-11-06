@@ -16,7 +16,9 @@ npm run dev                   # http://localhost:3000
 ```
 
 You need a PostgreSQL 16+ database. For example: `docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres:16`.
-If `SMTP_HOST` is empty, verification links are printed to the server console. Open the link to verify.
+If `SMTP_HOST` is empty, verification and password-reset links are printed to the server console. Open the link to verify.
+
+Password reset: `/forgot-password` emails a single-use link to `/reset-password` that expires after 1 hour. The response is the same whether or not the account exists. A reset also verifies the email and signs out every existing session.
 
 Checks: `npm run build`, `npx tsc --noEmit`, `npm run lint`, `npx prisma validate`, `npx vitest run`.
 

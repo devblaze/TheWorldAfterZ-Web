@@ -3,13 +3,14 @@
 Stack: Next.js (App Router, TypeScript) + Auth.js credentials provider + PostgreSQL via Prisma.
 
 ## Routes
-Public: `/` landing, `/register`, `/login`, `/logout`.
+Public: `/` landing, `/register`, `/login`, `/logout`, `/forgot-password`, `/reset-password?token=` (`POST /api/forgot-password`, `POST /api/reset-password`).
 Player (signed in): `/account` (key status), `/redeem`, `/download` (only with an active redemption).
 Admin (role=ADMIN): `/admin/keys` (list/filter, mint batch, revoke), `/admin/users`.
 API: `POST /api/redeem`, `GET /api/download` (issues a short-lived signed link), `POST /api/admin/keys/mint`, `POST /api/admin/keys/:id/revoke`.
 
 ## Schema
-- User: id, email (unique, lowercased), passwordHash (argon2id), role (PLAYER|ADMIN), createdAt, emailVerifiedAt?
+- User: id, email (unique, lowercased), passwordHash (argon2id), role (PLAYER|ADMIN), createdAt, emailVerifiedAt?, passwordChangedAt? (JWTs issued before it are rejected)
+- PasswordResetToken: id, userId, tokenHash (sha256), expiresAt (1h), usedAt?, createdAt
 - AccessKey: id, codeHash (sha256 of code; plaintext shown once at mint), codePrefix (first 4 chars, for admin lookup), tier (ALPHA|BETA), status (ACTIVE|REDEEMED|REVOKED), batchLabel, createdById, createdAt, revokedAt?, revokeReason?
 - Redemption: id, keyId (unique, one use per key), userId, redeemedAt, ip
 - DownloadEvent: id, userId, artifactVersion, issuedAt, ip

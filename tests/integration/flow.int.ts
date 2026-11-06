@@ -21,12 +21,15 @@ const download = await import("@/app/api/download/route");
 const downloadFile = await import("@/app/api/download/file/route");
 const mint = await import("@/app/api/admin/keys/mint/route");
 const revoke = await import("@/app/api/admin/keys/[id]/revoke/route");
+const forgot = await import("@/app/api/forgot-password/route");
+const reset = await import("@/app/api/reset-password/route");
 
 const BASE = process.env.AUTH_URL!;
 const run = randomBytes(4).toString("hex"); // unique per run, so the DB need not be empty
 const ip = `10.${randomBytes(3).join(".")}`; // own rate-limit buckets per run
 const player = { email: `player-${run}@example.test`, password: "correct horse battery" };
 const admin = { email: `admin-${run}@example.test`, password: "admin password 123" };
+const resetter = { email: `reset-${run}@example.test`, password: "original password 1" };
 
 type Jar = Map<string, string>;
 const cookieHeader = (jar: Jar) => [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
@@ -88,7 +91,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await prisma.user.deleteMany({ where: { email: { in: [player.email, admin.email] } } });
+  await prisma.user.deleteMany({ where: { email: { in: [player.email, admin.email, resetter.email]} } });
   await prisma.$disconnect();
 });
 
@@ -193,5 +196,83 @@ describe("player flow", () => {
     expect(await login(player.email, player.password)).toBeNull();
     const row = await prisma.rateLimit.findUniqueOrThrow({ where: { key: `login:acct:${player.email}` } });
     expect(row.count).toBeGreaterThan(5);
+  });
+});
+
+describe("password reset", () => {
+  /** Requests a reset; returns the response and the emailed token (null if none was sent). */
+  async function requestReset(email: string) {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const res = await forgot.POST(req("/api/forgot-password", { body: form({ email }) }));
+    const line = log.mock.calls.map((c) => String(c[0])).find((l) => l.includes(email));
+    log.mockRestore();
+    return { res, token: line ? new URL(line.split(": ").pop()!).searchParams.get("token") : null };
+  }
+  const doReset = (token: string, password: string, confirm = password) =>
+    reset.POST(req("/api/reset-password", { body: form({ token, password, confirm }) }));
+
+  let token = "";
+  const newPassword = "brand new password 2";
+
+  beforeAll(async () => {
+    // Unverified on purpose: a reset link proves inbox ownership.
+    await prisma.user.create({
+      data: { email: resetter.email, passwordHash: await argon2.hash(resetter.password, { type: argon2.argon2id }) },
+    });
+  });
+
+  it("responds identically for known and unknown emails", async () => {
+    const known = await requestReset(resetter.email);
+    const unknown = await requestReset(`nobody-${run}@example.test`);
+    expect(known.res.status).toBe(303);
+    expect(location(known.res)).toBe("/forgot-password?sent=1");
+    expect([unknown.res.status, location(unknown.res)]).toEqual([known.res.status, location(known.res)]);
+    expect(unknown.token).toBeNull();
+    expect(known.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    token = known.token!;
+  });
+
+  it("rejects mismatched passwords without consuming the token", async () => {
+    expect(location(await doReset(token, newPassword, "different password"))).toBe(`/reset-password?token=${token}&error=invalid`);
+  });
+
+  it("resets with a valid token, verifies the email and swaps the password", async () => {
+    expect(location(await doReset(token, newPassword))).toBe("/login?reset=1");
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: resetter.email } });
+    expect(user.emailVerifiedAt).toBeTruthy();
+    expect(user.passwordChangedAt).toBeTruthy();
+    expect(await prisma.auditLog.count({ where: { actorId: user.id, action: "PASSWORD_RESET" } })).toBe(1);
+    expect(await login(resetter.email, resetter.password)).toBeNull();
+    expect(await login(resetter.email, newPassword)).toBeTruthy();
+  });
+
+  it("refuses to reuse the token", async () => {
+    expect(location(await doReset(token, "another password 3"))).toBe("/reset-password?error=token");
+  });
+
+  it("refuses an expired token", async () => {
+    const { token: t } = await requestReset(resetter.email);
+    await prisma.passwordResetToken.update({ where: { tokenHash: sha256(t!) }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    expect(location(await doReset(t!, "another password 3"))).toBe("/reset-password?error=token");
+  });
+
+  it("signs out sessions issued before the reset", async () => {
+    const jar = (await login(resetter.email, newPassword))!;
+    // Signed in without a key: 403. Signed out: 401.
+    expect((await download.GET(req("/api/download", { jar }))).status).toBe(403);
+    const { token: t } = await requestReset(resetter.email);
+    expect(location(await doReset(t!, "third password 44"))).toBe("/login?reset=1");
+    expect((await download.GET(req("/api/download", { jar }))).status).toBe(401);
+    const fresh = (await login(resetter.email, "third password 44"))!;
+    expect((await download.GET(req("/api/download", { jar: fresh }))).status).toBe(403);
+  });
+
+  it("rate limits reset requests per account but still answers generically", async () => {
+    // Three requests so far for this account; the limit is 3 per hour.
+    const { res, token: t } = await requestReset(resetter.email);
+    expect(location(res)).toBe("/forgot-password?sent=1");
+    expect(t).toBeNull();
+    const row = await prisma.rateLimit.findUniqueOrThrow({ where: { key: `forgot:acct:${resetter.email}` } });
+    expect(row.count).toBe(4);
   });
 });
