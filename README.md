@@ -25,7 +25,7 @@ Checks: `npm run build`, `npx tsc --noEmit`, `npm run lint`, `npx prisma validat
 | `DATABASE_URL` | Postgres connection string |
 | `POSTGRES_PASSWORD` | Password for the compose `db` service (compose builds `DATABASE_URL` from it) |
 | `AUTH_SECRET` | Auth.js JWT encryption secret (`openssl rand -base64 32`) |
-| `AUTH_URL` | Public base URL, e.g. `https://play.ncatechsolutions.org`. Used for email links and the API origin check |
+| `AUTH_URL` | Public base URL, e.g. `https://theworldafterz.ncatechsolutions.org`. Used for email links and the API origin check |
 | `AUTH_TRUST_HOST` | `true` behind the reverse proxy |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | Outgoing mail for verification. Leave `SMTP_HOST` empty to log links instead |
 | `DOWNLOAD_SIGNING_SECRET` | HMAC key for the 5-minute download links (`openssl rand -base64 32`) |
@@ -48,10 +48,10 @@ docker compose exec app node scripts/admin-create.mjs --email you@example.com
 
 If the user exists, they are promoted to ADMIN and marked verified. Otherwise a verified admin is created and a random password is printed once. The action is written to AuditLog.
 
-## Deploying to play.ncatechsolutions.org
+## Deploying to theworldafterz.ncatechsolutions.org
 
 1. Copy the repo to the server and create `.env` from `.env.example`, using real secrets.
-   Set `AUTH_URL=https://play.ncatechsolutions.org` and `AUTH_TRUST_HOST=true`, and fill in the SMTP settings.
+   Set `AUTH_URL=https://theworldafterz.ncatechsolutions.org` and `AUTH_TRUST_HOST=true`, and fill in the SMTP settings.
 2. Run `docker compose up -d --build`. The app listens on **127.0.0.1:3000 only**, and Postgres is not published at all.
 3. Point the existing HTTPS reverse proxy at `http://127.0.0.1:3000`. It must:
    - pass `Host` and set `X-Forwarded-Proto https`;
