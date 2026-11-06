@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { sendVerification } from "@/lib/email";
 import { ipFrom, limitBoth } from "@/lib/rate-limit";
 import { seeOther } from "@/lib/session";
+import { isAdminEmail } from "@/lib/admin";
 
 const Input = z.object({
   email: z.email().max(254).transform((e) => e.toLowerCase()),
@@ -20,7 +21,11 @@ export async function POST(req: Request) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (!existing) {
     const user = await prisma.user.create({
-      data: { email, passwordHash: await argon2.hash(password, { type: argon2.argon2id }) },
+      data: {
+        email,
+        passwordHash: await argon2.hash(password, { type: argon2.argon2id }),
+        role: isAdminEmail(email) ? "ADMIN" : "PLAYER",
+      },
     });
     await prisma.auditLog.create({ data: { actorId: user.id, action: "USER_REGISTERED", targetId: user.id } });
     await sendVerification(user.id, email);

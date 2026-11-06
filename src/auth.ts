@@ -4,6 +4,7 @@ import argon2 from "argon2";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { ipFrom, limitBoth } from "@/lib/rate-limit";
+import { isAdminEmail } from "@/lib/admin";
 
 const LoginInput = z.object({ email: z.email().max(254), password: z.string().min(1).max(256) });
 
@@ -27,6 +28,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const ok = await argon2.verify(user?.passwordHash ?? (await DUMMY_HASH), parsed.data.password);
         // Unverified accounts get the same generic error as a bad password.
         if (!user || !ok || !user.emailVerifiedAt) throw new CredentialsSignin();
+        // Promote accounts listed in ADMIN_EMAILS that registered before the list was set.
+        if (user.role !== "ADMIN" && isAdminEmail(email)) {
+          await prisma.user.update({ where: { id: user.id }, data: { role: "ADMIN" } });
+          await prisma.auditLog.create({ data: { actorId: user.id, action: "ADMIN_PROMOTED", targetId: user.id } });
+        }
         return { id: user.id, email: user.email };
       },
     }),
