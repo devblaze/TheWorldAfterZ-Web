@@ -23,7 +23,7 @@ const features: Feature[] = [
   {
     title: "Health, hunger, thirst",
     body: "Keep all three up. The HUD also tracks your body temperature against how cold it feels outside.",
-    shot: screen("horde-closing"),
+    shot: screen("hud-vitals"),
   },
   {
     title: "Four seasons",
