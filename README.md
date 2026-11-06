@@ -1,5 +1,7 @@
 # TheWorldAfterZ player website
 
+[![CI](https://git.ncatechsolutions.org/nickanton/TheWorldAfterZ-Web/actions/workflows/ci.yml/badge.svg?branch=main)](https://git.ncatechsolutions.org/nickanton/TheWorldAfterZ-Web/actions?workflow=ci.yml)
+
 Next.js (App Router, TypeScript) + Auth.js v5 (credentials, JWT sessions) + PostgreSQL/Prisma.
 Players register, verify their email, redeem an access key and download the launcher. Admins mint and revoke keys.
 Design notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -17,6 +19,17 @@ You need a PostgreSQL 16+ database. For example: `docker run -d -p 5432:5432 -e 
 If `SMTP_HOST` is empty, verification links are printed to the server console. Open the link to verify.
 
 Checks: `npm run build`, `npx tsc --noEmit`, `npm run lint`, `npx prisma validate`, `npx vitest run`.
+
+## CI
+
+[`.gitea/workflows/ci.yml`](.gitea/workflows/ci.yml) runs on every push and pull request to `main`, in a `node:22` container
+with a `postgres:16` service: `npm ci`, `prisma generate`, `prisma validate`, lint, `tsc --noEmit`, unit tests,
+`prisma migrate deploy`, integration tests, `next build`. All env values in the workflow are dummies.
+
+Integration tests (`tests/integration/`, `npm run test:integration`) drive the real route handlers against the
+database at `DATABASE_URL`, so point it at a throwaway, migrated database. They need the same env as CI
+(`AUTH_SECRET`, `AUTH_URL`, `DOWNLOAD_SIGNING_SECRET`, `LAUNCHER_DIR=./deploy/launcher-example`, `SMTP_HOST` empty).
+Unit tests (`npm test`) need no database.
 
 ## Environment variables
 
