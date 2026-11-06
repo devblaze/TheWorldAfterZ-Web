@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PLAYER
+  ADMIN
+}
+
+enum KeyTier {
+  ALPHA
+  BETA
+}
+
+enum KeyStatus {
+  ACTIVE
+  REDEEMED
+  REVOKED
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique // stored lowercased
+  passwordHash    String
+  role            Role      @default(PLAYER)
+  createdAt       DateTime  @default(now())
+  emailVerifiedAt DateTime?
+
+  redemptions        Redemption[]
+  downloadEvents     DownloadEvent[]
+  auditLogs          AuditLog[]
+  mintedKeys         AccessKey[]
+  verificationTokens EmailVerificationToken[]
+}
+
+model AccessKey {
+  id           String    @id @default(cuid())
+  codeHash     String    @unique // sha256 hex of the normalized code
+  codePrefix   String // first group after TWAZ-, for admin lookup
+  tier         KeyTier
+  status       KeyStatus @default(ACTIVE)
+  batchLabel   String
+  createdById  String?
+  createdBy    User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+  revokeReason String?
+
+  redemption Redemption?
+
+  @@index([codePrefix])
+  @@index([status, tier])
+}
+
+model Redemption {
+  id         String    @id @default(cuid())
+  keyId      String    @unique
+  key        AccessKey @relation(fields: [keyId], references: [id])
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redeemedAt DateTime  @default(now())
+  ip         String?
+
+  @@index([userId])
+}
+
+model DownloadEvent {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  artifactVersion String
+  issuedAt        DateTime @default(now())
+  ip              String?
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  actorId  String?
+  actor    User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action   String
+  targetId String?
+  meta     Json?
+  at       DateTime @default(now())
+
+  @@index([at])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique // sha256 hex
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Fixed-window counter: one row per bucket key, reset when the window rolls over.
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+}
