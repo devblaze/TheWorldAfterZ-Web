@@ -32,7 +32,7 @@ export function Gallery({ items }: { items: Screen[] }) {
               aria-label={`Open screenshot: ${s.caption}`}
             >
               <span className="relative block aspect-video overflow-hidden rounded border border-stone-800 group-hover:border-amber-600 group-focus-visible:border-amber-500 group-focus-visible:ring-2 group-focus-visible:ring-amber-500">
-                <Image src={s.thumb} alt={s.alt} fill sizes="(min-width: 1024px) 240px, (min-width: 640px) 33vw, 50vw" className="object-cover" />
+                <Image src={s.thumb} alt={s.alt} fill sizes="(min-width: 1024px) 240px, (min-width: 640px) 33vw, 50vw" className="absolute inset-0 size-full object-cover" />
               </span>
               <span className="mt-1 block text-xs text-stone-400">{s.caption}</span>
             </button>
@@ -57,7 +57,7 @@ export function Gallery({ items }: { items: Screen[] }) {
         {cur && (
           <figure>
             <div className="relative aspect-video w-full bg-black">
-              <Image src={cur.src} alt={cur.alt} fill sizes="95vw" className="object-contain" />
+              <Image src={cur.src} alt={cur.alt} fill sizes="95vw" className="absolute inset-0 size-full object-contain" />
             </div>
             <figcaption className="mt-2 flex items-center gap-3 text-sm">
               <button type="button" onClick={() => step(-1)} className="rounded border border-stone-700 px-3 py-1 hover:border-amber-600" aria-label="Previous screenshot">

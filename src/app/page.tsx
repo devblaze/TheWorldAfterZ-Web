@@ -48,7 +48,7 @@ export default function Home() {
   return (
     <div className="space-y-20">
       <section className="relative -mt-10 overflow-hidden rounded-b border-x border-b border-stone-800 sm:rounded">
-        <Image src={hero.src} alt="" fill preload sizes="(min-width: 1024px) 1024px, 100vw" className="object-cover" />
+        <Image src={hero.src} alt="" fill preload sizes="(min-width: 1024px) 1024px, 100vw" className="absolute inset-0 size-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-b from-stone-950/70 via-stone-950/60 to-stone-950" />
         <div className="relative space-y-8 px-4 py-24 text-center sm:py-32">
           <h1 className="text-5xl font-black uppercase tracking-widest text-amber-600 drop-shadow-lg sm:text-7xl">
@@ -74,7 +74,7 @@ export default function Home() {
             <li key={f.title} className="overflow-hidden rounded border border-stone-800 bg-stone-900/80">
               {f.shot && (
                 <div className="relative aspect-video">
-                  <Image src={f.shot.thumb} alt={f.shot.alt} fill sizes="(min-width: 1024px) 330px, (min-width: 640px) 50vw, 100vw" className="object-cover" />
+                  <Image src={f.shot.thumb} alt={f.shot.alt} fill sizes="(min-width: 1024px) 330px, (min-width: 640px) 50vw, 100vw" className="absolute inset-0 size-full object-cover" />
                 </div>
               )}
               <div className="space-y-2 p-4">
