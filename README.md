@@ -71,6 +71,15 @@ If the user exists, they are promoted to ADMIN and marked verified. Otherwise a 
 
 The app sends HSTS, CSP (with a per-request nonce), X-Frame-Options DENY, nosniff and Referrer-Policy itself, so the proxy does not need to add them.
 
+## Deploying with EasyDeploy (deploy.ncatechsolutions.org)
+
+The target is https://theworldafterz.ncatechsolutions.org, which is behind Cloudflare. EasyDeploy terminates TLS.
+1. Create an app in EasyDeploy from this repo using `docker-compose.yml`.
+2. Set the env vars from `.env.example` in EasyDeploy (`.env` is optional). Set `AUTH_URL=https://theworldafterz.ncatechsolutions.org` and `AUTH_TRUST_HOST=true`, and set `APP_BIND` if EasyDeploy's proxy needs the port on all interfaces.
+3. Route the hostname to the `app` service on port 3000. Keep `db` private.
+4. Confirm that the real client IP arrives in `X-Real-IP` or as the last `X-Forwarded-For` entry. Behind Cloudflare it may only be in `CF-Connecting-IP`. If so, the rate-limit IP lookup must be adjusted before launch.
+5. Mount persistent volumes for `pgdata` and `launcher`, then create the admin.
+
 ## Dropping in a launcher build
 
 The launcher is never in `public/`. It is served from `LAUNCHER_DIR` (the `launcher` named volume, mounted at `/launcher`), and only through a signed link that expires after 5 minutes.
