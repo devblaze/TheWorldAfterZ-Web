@@ -4,6 +4,8 @@ export const input =
   "w-full rounded border border-stone-700 bg-stone-900 px-3 py-2 text-stone-100 placeholder-stone-500 focus:border-amber-600 focus:outline-none";
 export const button =
   "inline-block rounded bg-amber-700 px-4 py-2 font-semibold uppercase tracking-wide text-stone-950 hover:bg-amber-600 disabled:opacity-50";
+export const buttonSecondary =
+  "inline-block rounded border border-stone-600 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-stone-200 hover:border-amber-600 hover:text-amber-500";
 export const buttonDanger = "rounded bg-red-800 px-3 py-1 text-sm font-semibold text-stone-100 hover:bg-red-700";
 
 export function Card({ title, children }: { title: string; children: ReactNode }) {
