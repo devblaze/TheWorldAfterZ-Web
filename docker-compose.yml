@@ -38,6 +38,15 @@ services:
     volumes:
       - launcher:/launcher:ro
 
+# Pinned so the network config never changes between deploys. Unpinned, EasyDeploy adds a subnet only when it creates
+# the network, so the next deploy sees a changed config, recreates the network, and fails while Traefik is attached.
+# 10.213.0.0/24 is the subnet EasyDeploy already gave prod's network; it is outside Docker's default pools.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.213.0.0/24
+
 volumes:
   pgdata:
   launcher:
