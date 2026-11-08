@@ -13,10 +13,12 @@ const Input = z.object({
 
 export async function POST(req: Request) {
   const form = await req.formData();
+  const fromLauncher = form.get("from") === "launcher";
+  const fail = (error: string) => seeOther(fromLauncher ? `/register?from=launcher&error=${error}` : `/register?error=${error}`);
   const parsed = Input.safeParse({ email: form.get("email"), password: form.get("password") });
-  if (!parsed.success) return seeOther("/register?error=invalid");
+  if (!parsed.success) return fail("invalid");
   const { email, password } = parsed.data;
-  if (!(await limitBoth("register", ipFrom(req.headers), email))) return seeOther("/register?error=rate");
+  if (!(await limitBoth("register", ipFrom(req.headers), email))) return fail("rate");
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (!existing) {
@@ -30,6 +32,6 @@ export async function POST(req: Request) {
     await prisma.auditLog.create({ data: { actorId: user.id, action: "USER_REGISTERED", targetId: user.id } });
     await sendVerification(user.id, email);
   }
-  // Same response whether or not the email was already registered.
-  return seeOther("/login?registered=1");
+  // Same response whether or not the email was already registered. from=launcher only changes the copy.
+  return seeOther(fromLauncher ? "/login?registered=1&from=launcher" : "/login?registered=1");
 }

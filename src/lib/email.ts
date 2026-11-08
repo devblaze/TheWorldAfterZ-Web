@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import nodemailer from "nodemailer";
 import { prisma } from "./db";
 import { sha256 } from "./crypto";
+import { revokeUserNativeSessions } from "./launcher/store";
 
 const DAY = 24 * 60 * 60_000;
 
@@ -52,6 +53,7 @@ export async function consumePasswordReset(token: string, passwordHash: string) 
       where: { id: t.userId },
       data: { passwordHash, passwordChangedAt: now, emailVerifiedAt: user.emailVerifiedAt ?? now },
     });
+    await revokeUserNativeSessions(tx, t.userId, "password_changed");
     await tx.passwordResetToken.deleteMany({ where: { userId: t.userId, id: { not: t.id } } });
     await tx.auditLog.create({ data: { actorId: t.userId, action: "PASSWORD_RESET", targetId: t.userId } });
     return t.userId;

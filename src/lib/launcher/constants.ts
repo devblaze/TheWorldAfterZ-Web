@@ -1,0 +1,9 @@
+export const CLIENT_ID = "twaz-launcher";
+export const ACCESS_TTL_S = 900;
+export const CODE_TTL_MS = 60_000;
+export const IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+export const ABSOLUTE_MS = 90 * 24 * 60 * 60 * 1000;
+export const PLAY_WINDOW_MS = 30_000;
+export const CODE_RETAIN_MS = 24 * 60 * 60 * 1000;
+export const REVOKE_MAX_IAT_AGE_S = 90 * 24 * 60 * 60;
+export const NEXT_MAX_LEN = 2048;
