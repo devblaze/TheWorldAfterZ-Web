@@ -38,6 +38,8 @@ model User {
   mintedKeys          AccessKey[]
   verificationTokens  EmailVerificationToken[]
   passwordResetTokens PasswordResetToken[]
+  nativeSessions      NativeSession[]
+  nativeAuthCodes     NativeAuthCode[]
 }
 
 model AccessKey {
@@ -116,6 +118,61 @@ model PasswordResetToken {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+}
+
+// One-time launcher authorization code. Only the sha256 of the code is stored.
+// sessionId is set in the same transaction as the code exchange. Rows stay for at least
+// 24h after expiresAt so a second presentation can revoke the linked session.
+model NativeAuthCode {
+  id            String    @id @default(cuid())
+  codeHash      String    @unique
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId      String
+  redirectUri   String
+  codeChallenge String
+  pwdAt         DateTime // passwordChangedAt snapshot; epoch when the user has never changed it
+  expiresAt     DateTime
+  usedAt        DateTime?
+  sessionId     String?   @unique
+  session       NativeSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// A refresh-token family. Access tokens are not stored; they die when this row is revoked or expired.
+model NativeSession {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId          String
+  createdAt         DateTime  @default(now())
+  absoluteExpiresAt DateTime
+  lastUsedAt        DateTime
+  idleExpiresAt     DateTime
+  revokedAt         DateTime?
+  revokeReason      String?
+
+  authCode      NativeAuthCode?
+  refreshTokens NativeRefreshToken[]
+
+  @@index([userId])
+  @@index([absoluteExpiresAt])
+}
+
+// Every issued refresh token, hashed. usedAt set means it was rotated; presenting it again revokes the family.
+model NativeRefreshToken {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique
+  sessionId    String
+  session      NativeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  usedAt       DateTime?
+  replacedById String?   @unique
+
+  @@index([sessionId])
 }
 
 // Fixed-window counter: one row per bucket key, reset when the window rolls over.

@@ -1,15 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { originAllowed } from "@/lib/origin";
+
+// The launcher calls these without a browser origin. Consent POST stays on the check.
+const LAUNCHER_CSRF_EXEMPT = new Set(["/api/launcher/token", "/api/launcher/revoke", "/api/launcher/play-check"]);
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  // CSRF defence for our own JSON/form APIs (Auth.js and server actions check this themselves).
-  if (request.method !== "GET" && request.method !== "HEAD" && pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/")) {
-    const expected = process.env.AUTH_URL ? new URL(process.env.AUTH_URL).origin : request.nextUrl.origin;
-    const origin = request.headers.get("origin");
-    // Some referrer policies make browsers send "Origin: null"; Sec-Fetch-Site can't be set by pages, so trust it then.
-    const sameSite = origin === "null" && request.headers.get("sec-fetch-site") === "same-origin";
-    if (origin !== expected && !sameSite) return new NextResponse("Forbidden", { status: 403 });
+  const mutating = request.method !== "GET" && request.method !== "HEAD";
+  const api = pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/");
+  const consent = pathname === "/launcher/authorize";
+  if (mutating && (consent || (api && !LAUNCHER_CSRF_EXEMPT.has(pathname))) && !originAllowed(request.headers, request.nextUrl.origin)) {
+    const headers = new Headers();
+    if (consent || pathname.startsWith("/api/launcher/")) {
+      headers.set("Cache-Control", "no-store");
+      headers.set("Pragma", "no-cache");
+    }
+    return new NextResponse("Forbidden", { status: 403, headers });
   }
 
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -33,6 +39,11 @@ export function proxy(request: NextRequest) {
   requestHeaders.set("Content-Security-Policy", csp);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
+  if (pathname === "/launcher/authorize" || pathname.startsWith("/api/launcher/")) {
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set("Pragma", "no-cache");
+  }
+  if (pathname === "/launcher/authorize") response.headers.set("Referrer-Policy", "no-referrer");
   return response;
 }
 
