@@ -161,6 +161,7 @@ function pageHeaders(res: Response) {
   noStore(res);
   expect(res.headers.get("referrer-policy")).toBe("no-referrer");
   expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  expect(res.headers.get("content-security-policy")).toContain("form-action 'self' http://127.0.0.1:*");
 }
 
 async function approve(jar: Jar, challenge: string, state = "state-state-state") {

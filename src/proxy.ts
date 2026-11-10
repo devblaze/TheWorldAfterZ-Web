@@ -29,7 +29,9 @@ export function proxy(request: NextRequest) {
     "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    // CSP form-action also covers the redirect after a form POST. Approve sends
+    // the browser to the launcher's loopback callback, so this path must allow it.
+    pathname === "/launcher/authorize" ? "form-action 'self' http://127.0.0.1:*" : "form-action 'self'",
     "frame-ancestors 'none'",
     ...(dev ? [] : ["upgrade-insecure-requests"]),
   ].join("; ");
