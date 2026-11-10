@@ -6,7 +6,7 @@ const NO_STORE = {
 const PAGE = {
   ...NO_STORE,
   "Referrer-Policy": "no-referrer",
-  "Content-Security-Policy": "frame-ancestors 'none'",
+  "Content-Security-Policy": "frame-ancestors 'none'; form-action 'self' http://127.0.0.1:*",
 } as const;
 
 export function launcherJson(body: unknown, status = 200, extra?: Record<string, string>) {

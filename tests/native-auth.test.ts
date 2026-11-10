@@ -233,4 +233,21 @@ describe("proxy origin check", () => {
     expect(page.headers.get("referrer-policy")).toBe("no-referrer");
     expect(page.headers.get("cache-control")).toBe("no-store");
   });
+
+  it("allows loopback form-action only on /launcher/authorize", () => {
+    const formAction = (csp: string | null) =>
+      (csp ?? "")
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith("form-action ")) ?? "";
+
+    const authorize = proxy(new NextRequest("http://localhost:3000/launcher/authorize"));
+    expect(formAction(authorize.headers.get("content-security-policy"))).toBe(
+      "form-action 'self' http://127.0.0.1:*",
+    );
+
+    const login = proxy(new NextRequest("http://localhost:3000/login"));
+    expect(formAction(login.headers.get("content-security-policy"))).toBe("form-action 'self'");
+    expect(login.headers.get("content-security-policy")).not.toContain("127.0.0.1");
+  });
 });
