@@ -1,8 +1,8 @@
 # Official servers — registry and heartbeat
 
 The site implements registry administration, heartbeat, the entitled launcher directory,
-and join-ticket issuance. There are no admit or session check/end routes yet. A ticket
-is not an admission decision; the dedicated server must still fail closed without admit.
+join-ticket issuance, admit, and session check/end. A ticket is not an admission decision;
+the dedicated server must still fail closed unless admit returns admitted:true.
 Do not register a live server, provision credentials, or deploy without Nick's approval.
 Public update feeds and the gated first-install download are unchanged.
 
@@ -103,7 +103,7 @@ base64url ticket is returned once; only its SHA-256 is stored. Ticket and TICKET
 audit writes are atomic; audit metadata never includes the ticket or its hash.
 The ticket is bound to the account, native session, server and compatibility values.
 Shared row locks protect issuance against session/key revoke and server changes.
-Admit must revalidate live state and enforce single use when step 4 is implemented.
+Admit revalidates live state and enforces single use (see below).
 
 Limits are separate, per account: directory 30/minute, join 10/minute. Every authenticated
 attempt counts, including malformed requests and denials. 429 includes Retry-After as
@@ -112,6 +112,77 @@ denials. Unexpected failures give 500 server_error and never grant access.
 
 The directory is a read snapshot, not a reservation or admission decision. A server can
 fill or be disabled after listing; join rechecks it and admit remains authoritative.
-Expired-ticket pruning belongs to the later admission lifecycle. Native-auth integration
+Expired-ticket pruning is not implemented. Native-auth integration
 tests currently require a UTC test database; this implementation changes no production
 timezone settings. Freeze reference: TheWorldAfterZ aa21ca99, docs/OFFICIAL_DEDICATED_SERVER.md.
+
+## Admit and session checks (steps 4 and 5)
+
+All three routes use `Authorization: TwazServer <serverId>.<secret>`, never read cookies,
+are CSRF-exempt only through the existing `/api/servers/` prefix, return JSON no-store
+with no redirects, and answer unsupported methods with 405 JSON (`Allow: POST`). Order:
+server auth, per-server rate limit, input validation, then a transaction that takes a
+shared row lock on the server and re-verifies the credential, so a rotation or disable
+committed first wins (401 invalid_server). Limits per server per minute: admit 60,
+sessions/check 120, sessions/end 600; 429 carries Retry-After. Unexpected failures give
+500 server_error and grant nothing. Malformed requests count against the limit. The DB
+transaction budget is 4 seconds, with at most 1 second waiting to start one. Check allows
+batched 256-id polls at the registry's 10000-player cap (40 batches/minute); clients with
+more than 256 connected sessions must batch their checks.
+
+POST `/api/servers/admit` takes JSON `ticket`, `instance_nonce` (16–128 printable ASCII),
+`connection_id` (decimal unsigned 64-bit string), `build_family`, `protocol_version`,
+`game_build` (informational, logged only); body max 2048 bytes; unknown fields are rejected.
+Success is 200 `{admitted:true,accountId,displayName,serverSessionId}`; every denial is
+200 `{admitted:false,reason}` with reason one of ticket_invalid, ticket_used,
+ticket_expired, wrong_server, stale_instance, build_mismatch, no_key, unverified,
+session_revoked. The server must drop the connection on anything else, and on any error
+or 5 s timeout. displayName is a stable non-PII `Player-xxxxxxxx` derived from the
+account id; it is never the email. Checks, in order:
+1. The conditional UPDATE consumes a ticket only when unused, unexpired, and bound to
+   this authenticated server. The SQL uses the current UTC clock at statement execution,
+   not the earlier transaction-start clock, so a ticket cannot expire while waiting for
+   a lock and still be admitted. Concurrent admits of one ticket have exactly one winner.
+2. On 0 rows: a known used ticket is ticket_used plus TICKET_REUSE (even when presented
+   by another server); an unused foreign ticket is wrong_server; an unused expired ticket
+   is ticket_expired; otherwise ticket_invalid. None of these consumes a foreign ticket.
+3. Compare instance_nonce to the latest heartbeat (stale_instance), and compare family
+   and protocol to BOTH current registration and ticket-bound values (build_mismatch).
+4. Live account recheck: native session, password, verification, any non-REVOKED key
+   (ALPHA=BETA, no expiry). Unverified gives unverified, no active key gives no_key, and
+   a revoked/expired native session or a password changed after the session was created
+   gives session_revoked (the raw reason is in the audit meta).
+5. A connection identity (serverId, instance_nonce, connection_id) that already has a
+   session is denied ticket_invalid (audit detail connection_reused).
+6. A ServerSession and an ADMIT_OK audit are written.
+All business denials AFTER consumption keep the ticket spent and write ADMIT_DENY in
+that same transaction, including stale-instance and current-build denials. Replay always
+becomes ticket_used. An audit failure rolls the transaction back (500). Audit metadata
+never contains the ticket or its hash. connection_id must be canonical decimal (no
+leading zeros except zero), avoiding alternate spellings of one NGO uint64 identity.
+
+The plan's zero-row shorthand says "used, else invalid", but its declared reason set
+also includes wrong_server and ticket_expired; the classification above preserves those
+specific declared reasons. NativeSession has no pwdAt column: password checks use its
+creation time, matching the existing refresh invariant. Password reset also revokes all
+native sessions transactionally. Native-session and active-key shared locks protect live
+checks. User rows are read after the native-session lock without an extra row lock: this
+avoids deadlocks with refresh (session then user) and reset (user then session). An
+in-flight reset may wait for an earlier decision; once reset commits, later checks deny.
+The account read is a live snapshot; no offline entitlement cache is used.
+
+POST `/api/servers/sessions/check` takes `{serverSessionIds:[...]}` (at most 256 ids, each
+1–64 of A-Za-z0-9_-; duplicates are collapsed; body max 24576 bytes). Response 200
+`{revoke:[{serverSessionId,reason}],checkedAt}` in first-seen order, reason one of
+key_revoked, password_changed, session_revoked, unverified, unknown_session. Precedence:
+password_changed, session_revoked, unverified, key_revoked. Ids that are unknown, owned by
+another server, or already ended return unknown_session with no mutation. A lost open
+session is ended (endReason = reason) with a PLAYER_KICK audit; repeating the call is
+idempotent. Entitled sessions are omitted. The server must kick everything returned,
+and every connected player if the call fails or times out.
+
+POST `/api/servers/sessions/end` takes `{serverSessionId,reason}` (reason 1–64 of
+A-Za-z0-9_.-; body max 1024 bytes) for the server's own sessions and returns `{ok:true}`. It is idempotent: the
+first end wins and unknown, foreign or ended ids change nothing but still return ok.
+
+Not covered by tests: real dedicated-server traffic and production behaviour.

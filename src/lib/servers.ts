@@ -7,7 +7,7 @@ export const SERVER_AUDIT = {
   rotated: "SERVER_SECRET_ROTATED",
   disabled: "SERVER_DISABLED",
   compatUpdated: "SERVER_COMPAT_UPDATED",
-  // Admission audit names; ticket issuance is implemented, admit/session actions are reserved.
+  // Admission audit names; issued by join-ticket, admit and sessions/*.
   ticketIssued: "TICKET_ISSUED",
   admitOk: "ADMIT_OK",
   admitDeny: "ADMIT_DENY",
@@ -18,6 +18,13 @@ export const SERVER_AUDIT = {
 export const CLIENT_PLATFORMS = ["win-x64", "linux-x64"] as const;
 export const HEARTBEAT_LIMIT = { perServer: 4, windowMs: 60_000 } as const;
 export const heartbeatKey = (serverId: string) => `server-heartbeat:${serverId}`;
+/** Per-server fixed-window limits, counted after the credential check. check allows batched 256-id polls at the 10000-player registry cap; end allows disconnect bursts. */
+export const SERVER_LIMITS = {
+  admit: { prefix: "server-admit", limit: 60, windowMs: 60_000 },
+  check: { prefix: "server-check", limit: 120, windowMs: 60_000 },
+  end: { prefix: "server-end", limit: 600, windowMs: 60_000 },
+} as const;
+export const CHECK_MAX_IDS = 256;
 export const MAX_PLAYERS = 10_000;
 /** Online = last heartbeat within this window. */
 export const ONLINE_MS = 90_000;
@@ -68,6 +75,7 @@ export const CreateServer = Compat.extend({
   port: z.number().int().min(1).max(65535),
 });
 
+const nonce = z.string().min(16).max(128).regex(/^[\x21-\x7e]+$/);
 const informational = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/);
 
 export const Heartbeat = z.object({
@@ -75,7 +83,7 @@ export const Heartbeat = z.object({
   build_family: z.string().min(1).max(64),
   protocol_version: protocolVersion,
   server_runtime: informational,
-  instance_nonce: z.string().min(16).max(128).regex(/^[\x21-\x7e]+$/),
+  instance_nonce: nonce,
   players: z.number().int().min(0).max(MAX_PLAYERS),
   maxPlayers: z.number().int().min(1).max(MAX_PLAYERS),
 }).refine((b) => b.players <= b.maxPlayers);
@@ -106,3 +114,18 @@ export function parseDirectoryQuery(q: URLSearchParams) {
     game_build: one("game_build"),
   });
 }
+
+const MAX_U64 = "18446744073709551615";
+const sessionId = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
+
+/** `ticket` is only length-bounded: a client-relayed garbage ticket must reach ticket_invalid, not a 400. */
+export const AdmitRequest = z.strictObject({
+  ticket: z.string().min(1).max(256),
+  instance_nonce: nonce,
+  connection_id: z.string().regex(/^(0|[1-9][0-9]{0,19})$/).refine((v) => v.length < 20 || v <= MAX_U64),
+  build_family: z.string().min(1).max(64),
+  protocol_version: protocolVersion,
+  game_build: z.string().min(1).max(128).regex(/^[\x21-\x7e]+$/),
+});
+export const CheckRequest = z.strictObject({ serverSessionIds: z.array(sessionId).max(CHECK_MAX_IDS) });
+export const EndRequest = z.strictObject({ serverSessionId: sessionId, reason: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/) });
