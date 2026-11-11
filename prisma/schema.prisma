@@ -40,6 +40,9 @@ model User {
   passwordResetTokens PasswordResetToken[]
   nativeSessions      NativeSession[]
   nativeAuthCodes     NativeAuthCode[]
+  createdServers      OfficialServer[]
+  joinTickets         JoinTicket[]
+  serverSessions      ServerSession[]
 }
 
 model AccessKey {
@@ -157,6 +160,7 @@ model NativeSession {
 
   authCode      NativeAuthCode?
   refreshTokens NativeRefreshToken[]
+  joinTickets   JoinTicket[]
 
   @@index([userId])
   @@index([absoluteExpiresAt])
@@ -180,4 +184,88 @@ model RateLimit {
   key         String   @id
   windowStart DateTime
   count       Int
+}
+
+enum ServerStatus {
+  ACTIVE
+  DISABLED
+}
+
+// An official dedicated server. Only the sha256 of its secret is stored.
+// Clients may join when buildFamily AND protocolVersion match; gameBuild/serverRuntime are informational only.
+model OfficialServer {
+  id                String       @id @default(cuid())
+  name              String
+  region            String
+  host              String
+  port              Int
+  gameBuild         String // admin-registered, informational
+  buildFamily       String
+  protocolVersion   Int
+  clientPlatforms   String[] // client OS builds allowed to join, e.g. win-x64, linux-x64
+  status            ServerStatus @default(ACTIVE)
+  secretHash        String
+  secretRotatedAt   DateTime
+  lastHeartbeatAt   DateTime?
+  instanceNonce     String? // from the latest heartbeat; a new value means the process restarted
+  reportedGameBuild String? // last heartbeat game_build, logged only
+  serverRuntime     String? // last heartbeat server_runtime, never used to filter clients
+  players           Int          @default(0)
+  maxPlayers        Int          @default(0)
+  createdById       String?
+  createdBy         User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  joinTickets JoinTicket[]
+  sessions    ServerSession[]
+
+  @@index([status, lastHeartbeatAt])
+}
+
+// Single-use, 60 s ticket minted by the site. Only the sha256 is stored.
+model JoinTicket {
+  id               String         @id @default(cuid())
+  ticketHash       String         @unique
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nativeSessionId  String
+  nativeSession    NativeSession  @relation(fields: [nativeSessionId], references: [id], onDelete: Cascade)
+  serverId         String
+  server           OfficialServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  gameBuild        String // informational
+  buildFamily      String
+  protocolVersion  Int
+  clientPlatform   String
+  createdAt        DateTime       @default(now())
+  expiresAt        DateTime
+  usedAt           DateTime?
+  usedByConnection String? // "<instanceNonce>:<connectionId>" of the admitting connection
+
+  serverSession ServerSession?
+
+  @@index([userId])
+  @@index([serverId])
+  @@index([expiresAt])
+}
+
+// A player admitted to an official server. Connection identity is (serverId, instanceNonce, connectionId)
+// so NGO client ids reused across server restarts never collide.
+model ServerSession {
+  id            String         @id @default(cuid())
+  serverId      String
+  server        OfficialServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketId      String         @unique
+  ticket        JoinTicket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  instanceNonce String
+  connectionId  String
+  admittedAt    DateTime       @default(now())
+  endedAt       DateTime?
+  endReason     String?
+
+  @@unique([serverId, instanceNonce, connectionId])
+  @@index([serverId, endedAt])
+  @@index([userId, endedAt])
 }

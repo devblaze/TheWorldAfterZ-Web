@@ -30,6 +30,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   <>
                     <Link className={link} href="/admin/keys">Keys</Link>
                     <Link className={link} href="/admin/users">Users</Link>
+                    <Link className={link} href="/admin/servers">Servers</Link>
                   </>
                 )}
                 <Link className={link} href="/logout">Logout</Link>
