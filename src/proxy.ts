@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { originAllowed } from "@/lib/origin";
 
 // The launcher and dedicated servers call these without a browser origin and never read cookies. Consent POST stays on the check.
-const LAUNCHER_CSRF_EXEMPT = new Set(["/api/launcher/token", "/api/launcher/revoke", "/api/launcher/play-check"]);
+const LAUNCHER_CSRF_EXEMPT = new Set([
+  "/api/launcher/token",
+  "/api/launcher/revoke",
+  "/api/launcher/play-check",
+  "/api/launcher/servers",
+  "/api/launcher/join-ticket",
+]);
 const csrfExempt = (pathname: string) => LAUNCHER_CSRF_EXEMPT.has(pathname) || pathname.startsWith("/api/servers/");
 const noStorePath = (pathname: string) =>
   pathname === "/launcher/authorize" || pathname.startsWith("/api/launcher/") || pathname.startsWith("/api/servers/");
