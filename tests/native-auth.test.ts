@@ -219,6 +219,10 @@ describe("proxy origin check", () => {
     expect(post("/api/launcher/token", "https://evil.example").status).not.toBe(403);
     expect(post("/api/launcher/revoke", "https://evil.example").status).not.toBe(403);
     expect(post("/api/launcher/play-check").status).not.toBe(403);
+    expect(post("/api/launcher/join-ticket", "https://evil.example").status).not.toBe(403);
+    expect(post("/api/launcher/servers", "https://evil.example").status).not.toBe(403);
+    expect(post("/api/launcher/servers/x", "https://evil.example").status).toBe(403);
+    expect(post("/api/launcher/join-ticket/x", "https://evil.example").status).toBe(403);
     expect(post("/api/redeem", "https://evil.example").status).toBe(403);
     expect(post("/launcher/authorize", "https://evil.example").status).toBe(403);
     expect(post("/api/redeem", "http://localhost:3000").status).not.toBe(403);

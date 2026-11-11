@@ -7,7 +7,7 @@ export const SERVER_AUDIT = {
   rotated: "SERVER_SECRET_ROTATED",
   disabled: "SERVER_DISABLED",
   compatUpdated: "SERVER_COMPAT_UPDATED",
-  // Reserved for admission (steps 3-5), listed here so the action names live in one place.
+  // Admission audit names; ticket issuance is implemented, admit/session actions are reserved.
   ticketIssued: "TICKET_ISSUED",
   admitOk: "ADMIT_OK",
   admitDeny: "ADMIT_DENY",
@@ -19,6 +19,10 @@ export const CLIENT_PLATFORMS = ["win-x64", "linux-x64"] as const;
 export const HEARTBEAT_LIMIT = { perServer: 4, windowMs: 60_000 } as const;
 export const heartbeatKey = (serverId: string) => `server-heartbeat:${serverId}`;
 export const MAX_PLAYERS = 10_000;
+/** Online = last heartbeat within this window. */
+export const ONLINE_MS = 90_000;
+export const JOIN_TICKET_TTL_MS = 60_000;
+export const DIRECTORY_MAX = 64;
 
 /** 32 random bytes, base64url. The plaintext leaves the server once, in the create/rotate response. */
 export const newServerSecret = () => randomBytes(32).toString("base64url");
@@ -75,3 +79,30 @@ export const Heartbeat = z.object({
   players: z.number().int().min(0).max(MAX_PLAYERS),
   maxPlayers: z.number().int().min(1).max(MAX_PLAYERS),
 }).refine((b) => b.players <= b.maxPlayers);
+
+// Launcher-supplied build fields, shapes from the LAUNCHER freeze $defs (family, protocol, platform, stamp).
+const launcherBuild = {
+  build_family: z.string().min(1).max(64),
+  protocol_version: protocolVersion,
+  client_platform: z.enum(CLIENT_PLATFORMS),
+  game_build: z.string().min(1).max(128),
+};
+const base64urlId = (min: number, max: number) => z.string().min(min).max(max).regex(/^[A-Za-z0-9_-]+$/);
+
+export const JoinTicketRequest = z.object({ serverId: base64urlId(1, 128), nonce: base64urlId(16, 128), ...launcherBuild });
+const DirectoryQuery = z.object(launcherBuild);
+
+/** Each of the four params exactly once; protocol_version as a plain decimal integer. */
+export function parseDirectoryQuery(q: URLSearchParams) {
+  const one = (k: string) => {
+    const v = q.getAll(k);
+    return v.length === 1 ? v[0] : undefined;
+  };
+  const pv = one("protocol_version");
+  return DirectoryQuery.safeParse({
+    build_family: one("build_family"),
+    protocol_version: pv !== undefined && /^[1-9][0-9]{0,6}$/.test(pv) ? Number(pv) : pv,
+    client_platform: one("client_platform"),
+    game_build: one("game_build"),
+  });
+}

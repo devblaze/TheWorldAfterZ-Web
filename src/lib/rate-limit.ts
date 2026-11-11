@@ -25,6 +25,7 @@ export async function rateLimit(key: string, limit: number, windowMs: number, no
   return (await hit(key, windowStart(nowMs, windowMs))) <= limit;
 }
 
+const MIN = 60_000;
 const MIN15 = 15 * 60_000;
 const HOUR = 60 * 60_000;
 
@@ -43,6 +44,9 @@ export const LAUNCHER_LIMITS = {
   refresh: { ip: 120, session: 30, windowMs: MIN15 },
   play: { ip: 120, account: 120, windowMs: MIN15 },
   authorize: { account: 60, windowMs: MIN15 },
+  // Per minute, per account, separate buckets (ADMISSION freeze).
+  directory: { account: 30, windowMs: MIN },
+  join: { account: 10, windowMs: MIN },
 } as const;
 
 export const launcherTokenIpKey = (ip: string) => `launcher-token:ip:${ip}`;
@@ -52,6 +56,8 @@ export const launcherRefreshSidKey = (sid: string) => `launcher-refresh:sid:${si
 export const launcherPlayIpKey = (ip: string) => `launcher-play:ip:${ip}`;
 export const launcherPlayAccountKey = (accountId: string) => `launcher-play:acct:${accountId}`;
 export const launcherAuthorizeAccountKey = (userId: string) => `launcher-authorize:acct:${userId}`;
+export const launcherDirectoryAccountKey = (userId: string) => `launcher-directory:acct:${userId}`;
+export const launcherJoinAccountKey = (userId: string) => `launcher-join:acct:${userId}`;
 
 export const limitLauncherTokenIp = (ip: string) => {
   const l = LAUNCHER_LIMITS.token;
@@ -89,6 +95,16 @@ export async function limitLauncherPlay(ip: string, accountId: string): Promise<
 export const limitLauncherAuthorize = (userId: string) => {
   const l = LAUNCHER_LIMITS.authorize;
   return rateLimit(launcherAuthorizeAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
+};
+
+export const limitLauncherDirectory = (userId: string) => {
+  const l = LAUNCHER_LIMITS.directory;
+  return rateLimit(launcherDirectoryAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
+};
+
+export const limitLauncherJoin = (userId: string) => {
+  const l = LAUNCHER_LIMITS.join;
+  return rateLimit(launcherJoinAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
 };
 
 export const LIMITS = {
