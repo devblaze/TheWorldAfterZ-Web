@@ -45,6 +45,8 @@ Unit tests (`npm test`) need no database.
 | `AUTH_TRUST_HOST` | `true` behind the reverse proxy |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | Outgoing mail for verification. Leave `SMTP_HOST` empty to log links instead |
 | `DOWNLOAD_SIGNING_SECRET` | HMAC key for the 5-minute download links (`openssl rand -base64 32`) |
+| `LAUNCHER_FEED_URL` | Optional http(s) base URL ending in `/`; empty/unset disables feed lookup |
+| `LAUNCHER_CACHE_DIR` | Writable verified-object cache; default `/tmp/twaz-launcher-cache` (app-owned in Docker) |
 | `LAUNCHER_DIR` | Directory with `manifest.json` and the launcher file (`/launcher` in Docker) |
 
 ## Migrations
@@ -114,3 +116,29 @@ The launcher is never in `public/`. It is served from `LAUNCHER_DIR` (the `launc
    If you prefer, replace the named volume with a bind mount such as `./launcher:/launcher:ro` in `docker-compose.yml`.
 
 Write the file first and `manifest.json` last, so the manifest never points at a half-copied file.
+
+## Following the launcher update feed
+
+Set `LAUNCHER_FEED_URL=https://twaz-updates.ncatechsolutions.org/` to follow
+`playtest/latest.json` → `platforms.win-x64` → `launcher`. An explicit LAN override
+`http://192.168.4.20/twaz/` is supported if reachable; prefer HTTPS outside a trusted LAN.
+Unset/empty keeps the original volume-only resolution. Invalid configuration, missing
+launcher metadata, network failures, unsupported encoding or integrity failures fall
+back to the existing volume manifest; if neither is available, the existing unavailable notice remains.
+
+The page reads metadata only (5-second request timeouts, 256 KiB response caps,
+60-second in-process TTL). It displays `launcher.version` and decoded size. After the
+existing verified-account/key gate, `/api/download` downloads and verifies the immutable
+object **before** issuing its five-minute link, allowing safe volume fallback before
+signing. The file route re-resolves and verifies the exact filename/SHA identity;
+a promotion or fallback to a different SHA invalidates the link (retry Download).
+Existing in-flight filename-only links also expire on upgrade; no access gates change.
+
+Plain objects and `.gz` objects are supported; gzip is decoded server-side, never
+streamed unverified. Decoded size and SHA-256 must match, with a 512 MiB hard limit
+on both stored and decoded bytes and a 120-second transfer deadline. Concurrent
+requests share object work. Verified files are atomically renamed to SHA-named cache
+entries, revalidated on use, and retained indefinitely. The cache is private, not a
+public route. Its default `/tmp` location is writable by the non-root app user and
+is intentionally ephemeral across container replacements; a custom directory must
+be writable by UID 1001. The read-only launcher volume remains the fallback.
