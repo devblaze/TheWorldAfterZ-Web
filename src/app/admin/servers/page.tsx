@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/db";
 import { requireAdminPage } from "@/lib/session";
+import { ONLINE_MS } from "@/lib/servers";
 import { CreateServerForm, ServerActions } from "./ServerForms";
 
 export const dynamic = "force-dynamic";
 
-const ONLINE_MS = 90_000;
 const displayTime = (date: Date) => new Intl.DateTimeFormat("en-GB", {
   timeZone: "Europe/Athens", dateStyle: "medium", timeStyle: "short",
 }).format(date) + " (Athens)";

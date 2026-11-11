@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { launcherJson as noStoreJson } from "@/lib/launcher/http";
+import { methodNotAllowed, launcherJson as noStoreJson, readJsonBody } from "@/lib/launcher/http";
 import { rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches } from "@/lib/servers";
 
@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 const BODY_MAX = 4096;
 const invalidServer = () => noStoreJson({ error: "invalid_server" }, 401);
-const notAllowed = () => noStoreJson({ error: "method_not_allowed" }, 405, { Allow: "POST" });
+const notAllowed = methodNotAllowed("POST");
 export { notAllowed as GET, notAllowed as PUT, notAllowed as PATCH, notAllowed as DELETE, notAllowed as OPTIONS };
 
 type Locked = { status: string; secretHash: string; buildFamily: string; protocolVersion: number; instanceNonce: string | null };
@@ -24,34 +24,9 @@ export async function POST(req: Request) {
       return noStoreJson({ error: "rate_limited" }, 429, { "Retry-After": String(retryAfterSeconds(HEARTBEAT_LIMIT.windowMs)) });
     }
 
-    if (!(req.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) return noStoreJson({ error: "invalid_request" }, 400);
-    // Stop consuming oversized bodies instead of buffering an unbounded request.
-    const reader = req.body?.getReader();
-    if (!reader) return noStoreJson({ error: "invalid_request" }, 400);
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > BODY_MAX) {
-          await reader.cancel();
-          return noStoreJson({ error: "invalid_request" }, 400);
-        }
-        chunks.push(value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    const raw = Buffer.concat(chunks).toString("utf8");
-    let json: unknown;
-    try {
-      json = JSON.parse(raw);
-    } catch {
-      return noStoreJson({ error: "invalid_request" }, 400);
-    }
-    const parsed = Heartbeat.safeParse(json);
+    const body = await readJsonBody(req, BODY_MAX);
+    if (!body) return noStoreJson({ error: "invalid_request" }, 400);
+    const parsed = Heartbeat.safeParse(body.value);
     if (!parsed.success) return noStoreJson({ error: "invalid_request" }, 400);
     const b = parsed.data;
 

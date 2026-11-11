@@ -226,10 +226,17 @@ export async function rotateRefreshToken(input: { refreshToken: string; clientId
 export type AccessOk = { ok: true; userId: string; email: string; emailVerifiedAt: Date | null; sessionId: string; claims: AccessClaims };
 export type AccessErr = { ok: false; error: "invalid_token" | "session_revoked" | "password_changed" };
 
-export async function authenticateAccess(token: string): Promise<AccessOk | AccessErr> {
+/** Reads `Authorization: Bearer <token>`; null when absent or malformed. */
+export function bearerToken(header: string | null): string | null {
+  const match = header ? /^Bearer (\S+)$/i.exec(header.trim()) : null;
+  return match && match[1].length <= 4096 ? match[1] : null;
+}
+
+/** Live check of a launcher access token. Pass `db` to re-run it inside a transaction. */
+export async function authenticateAccess(token: string, db: Tx | typeof prisma = prisma): Promise<AccessOk | AccessErr> {
   const claims = verifyAccessToken(token);
   if (!claims) return { ok: false, error: "invalid_token" };
-  const session = await prisma.nativeSession.findUnique({ where: { id: claims.sid }, include: { user: true } });
+  const session = await db.nativeSession.findUnique({ where: { id: claims.sid }, include: { user: true } });
   if (!session || session.userId !== claims.sub || !session.user) return { ok: false, error: "session_revoked" };
   const user = session.user;
   if (user.passwordChangedAt && user.passwordChangedAt.getTime() > claims.pwdAt) {
