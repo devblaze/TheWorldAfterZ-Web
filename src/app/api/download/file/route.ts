@@ -1,17 +1,21 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import path from "node:path";
 import { Readable } from "node:stream";
 import { verifyDownload } from "@/lib/crypto";
-import { launcherDir, readManifest } from "@/lib/manifest";
+import { artifactIdentity, prepareDownload, readManifest } from "@/lib/manifest";
 
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
   const manifest = await readManifest();
-  if (!manifest || !verifyDownload(q.get("exp"), q.get("sig"), manifest.filename, process.env.DOWNLOAD_SIGNING_SECRET!)) {
+  if (!manifest || !verifyDownload(q.get("exp"), q.get("sig"), artifactIdentity(manifest), process.env.DOWNLOAD_SIGNING_SECRET!)) {
     return new Response("Link invalid or expired", { status: 403 });
   }
-  const file = path.join(launcherDir(), manifest.filename);
+  const prepared = await prepareDownload(manifest);
+  // A fallback or promotion must never replay the signature onto another artifact.
+  if (!prepared || artifactIdentity(prepared.manifest) !== artifactIdentity(manifest)) {
+    return new Response("Launcher not available yet", { status: 503 });
+  }
+  const { file } = prepared;
   const info = await stat(file).catch(() => null);
   if (!info?.isFile()) return new Response("Launcher not available yet", { status: 503 });
 
