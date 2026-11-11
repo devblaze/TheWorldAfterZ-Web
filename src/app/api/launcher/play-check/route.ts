@@ -1,6 +1,6 @@
 import { launcherJson } from "@/lib/launcher/http";
 import { PLAY_WINDOW_MS } from "@/lib/launcher/constants";
-import { authenticateAccess } from "@/lib/launcher/store";
+import { authenticateAccess, bearerToken } from "@/lib/launcher/store";
 import { ipFrom, limitLauncherPlay } from "@/lib/rate-limit";
 import { activeRedemption } from "@/lib/session";
 
@@ -8,12 +8,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const BODY_MAX = 8192;
-
-function bearer(header: string | null): string | null {
-  if (!header) return null;
-  const match = /^Bearer (\S+)$/i.exec(header.trim());
-  return match ? match[1] : null;
-}
 
 function readBody(raw: unknown): { nonce: string; game_build: unknown; platform: unknown } | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
@@ -27,8 +21,8 @@ function readBody(raw: unknown): { nonce: string; game_build: unknown; platform:
 
 export async function POST(req: Request) {
   try {
-    const token = bearer(req.headers.get("authorization"));
-    if (!token || token.length > 4096) return launcherJson({ error: "invalid_token" }, 401);
+    const token = bearerToken(req.headers.get("authorization"));
+    if (!token) return launcherJson({ error: "invalid_token" }, 401);
     const auth = await authenticateAccess(token);
     if (!auth.ok) return launcherJson({ error: auth.error }, 401);
 
