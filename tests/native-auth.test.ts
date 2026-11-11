@@ -225,6 +225,17 @@ describe("proxy origin check", () => {
     expect(post("/launcher/authorize", "null", { "sec-fetch-site": "same-origin" }).status).not.toBe(403);
   });
 
+  it("exempts only /api/servers/* for dedicated servers, never the admin server APIs", () => {
+    const servers = post("/api/servers/heartbeat", "https://evil.example");
+    expect(servers.status).not.toBe(403);
+    expect(servers.headers.get("cache-control")).toBe("no-store");
+    expect(post("/api/servers/heartbeat").status).not.toBe(403);
+    expect(post("/api/admin/servers", "https://evil.example").status).toBe(403);
+    expect(post("/api/admin/servers/abc/rotate").status).toBe(403);
+    expect(post("/api/serversx", "https://evil.example").status).toBe(403);
+    expect(post("/api/launcher/other", "https://evil.example").status).toBe(403);
+  });
+
   it("marks launcher responses no-store", () => {
     const res = post("/api/launcher/token", "https://evil.example");
     expect(res.headers.get("cache-control")).toBe("no-store");

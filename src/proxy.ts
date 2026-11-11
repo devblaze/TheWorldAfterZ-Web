@@ -1,17 +1,20 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { originAllowed } from "@/lib/origin";
 
-// The launcher calls these without a browser origin. Consent POST stays on the check.
+// The launcher and dedicated servers call these without a browser origin and never read cookies. Consent POST stays on the check.
 const LAUNCHER_CSRF_EXEMPT = new Set(["/api/launcher/token", "/api/launcher/revoke", "/api/launcher/play-check"]);
+const csrfExempt = (pathname: string) => LAUNCHER_CSRF_EXEMPT.has(pathname) || pathname.startsWith("/api/servers/");
+const noStorePath = (pathname: string) =>
+  pathname === "/launcher/authorize" || pathname.startsWith("/api/launcher/") || pathname.startsWith("/api/servers/");
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const mutating = request.method !== "GET" && request.method !== "HEAD";
   const api = pathname.startsWith("/api/") && !pathname.startsWith("/api/auth/");
   const consent = pathname === "/launcher/authorize";
-  if (mutating && (consent || (api && !LAUNCHER_CSRF_EXEMPT.has(pathname))) && !originAllowed(request.headers, request.nextUrl.origin)) {
+  if (mutating && (consent || (api && !csrfExempt(pathname))) && !originAllowed(request.headers, request.nextUrl.origin)) {
     const headers = new Headers();
-    if (consent || pathname.startsWith("/api/launcher/")) {
+    if (noStorePath(pathname)) {
       headers.set("Cache-Control", "no-store");
       headers.set("Pragma", "no-cache");
     }
@@ -41,7 +44,7 @@ export function proxy(request: NextRequest) {
   requestHeaders.set("Content-Security-Policy", csp);
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   response.headers.set("Content-Security-Policy", csp);
-  if (pathname === "/launcher/authorize" || pathname.startsWith("/api/launcher/")) {
+  if (noStorePath(pathname)) {
     response.headers.set("Cache-Control", "no-store");
     response.headers.set("Pragma", "no-cache");
   }
