@@ -23,6 +23,8 @@ services:
     environment:
       DATABASE_URL: postgresql://twaz:${POSTGRES_PASSWORD}@db:5432/twaz?schema=public
       LAUNCHER_DIR: /launcher
+      LAUNCHER_FEED_URL: ${LAUNCHER_FEED_URL:-}
+      LAUNCHER_CACHE_DIR: ${LAUNCHER_CACHE_DIR:-/tmp/twaz-launcher-cache}
       AUTH_URL: ${AUTH_URL:-https://theworldafterz.ncatechsolutions.org}
       AUTH_TRUST_HOST: "true"
       # Fail the deploy, not every login, when a secret is missing (Auth.js returns "server configuration" 500s).
