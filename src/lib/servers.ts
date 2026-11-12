@@ -77,9 +77,11 @@ export const CreateServer = Compat.extend({
 
 const nonce = z.string().min(16).max(128).regex(/^[\x21-\x7e]+$/);
 const informational = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/);
+/** game_build stamp: 1–128 printable ASCII, matching the contract $defs/stamp and admit/join. */
+const stamp = z.string().min(1).max(128).regex(/^[\x21-\x7e]+$/);
 
 export const Heartbeat = z.object({
-  game_build: informational,
+  game_build: stamp,
   build_family: z.string().min(1).max(64),
   protocol_version: protocolVersion,
   server_runtime: informational,
@@ -125,7 +127,7 @@ export const AdmitRequest = z.strictObject({
   connection_id: z.string().regex(/^(0|[1-9][0-9]{0,19})$/).refine((v) => v.length < 20 || v <= MAX_U64),
   build_family: z.string().min(1).max(64),
   protocol_version: protocolVersion,
-  game_build: z.string().min(1).max(128).regex(/^[\x21-\x7e]+$/),
+  game_build: stamp,
 });
 export const CheckRequest = z.strictObject({ serverSessionIds: z.array(sessionId).max(CHECK_MAX_IDS) });
 export const EndRequest = z.strictObject({ serverSessionId: sessionId, reason: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/) });
