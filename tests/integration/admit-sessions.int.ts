@@ -9,8 +9,9 @@ process.env.AUTH_TRUST_HOST ??= "true";
 
 const { prisma } = await import("@/lib/db");
 const { sha256 } = await import("@/lib/crypto");
-const { SERVER_LIMITS } = await import("@/lib/servers");
+const { SERVER_LIMITS, heartbeatKey } = await import("@/lib/servers");
 const { windowStart } = await import("@/lib/rate-limit");
+const heartbeat = await import("@/app/api/servers/heartbeat/route");
 const admit = await import("@/app/api/servers/admit/route");
 const check = await import("@/app/api/servers/sessions/check/route");
 const end = await import("@/app/api/servers/sessions/end/route");
@@ -128,11 +129,12 @@ afterAll(async () => {
   await prisma.officialServer.deleteMany({ where: { id: { in: serverIds } } });
   await prisma.auditLog.deleteMany({ where: { OR: [
     { actorId: { in: userIds } },
+    { targetId: { in: serverIds } },
     ...serverIds.map((serverId) => ({ meta: { path: ["serverId"], equals: serverId } })),
   ] } });
   await prisma.user.deleteMany({ where: { email: { in: emails } } });
   await prisma.accessKey.deleteMany({ where: { batchLabel: batch } });
-  await prisma.rateLimit.deleteMany({ where: { key: { in: serverIds.flatMap((id) => [`server-admit:${id}`, `server-check:${id}`, `server-end:${id}`]) } } });
+  await prisma.rateLimit.deleteMany({ where: { key: { in: serverIds.flatMap((id) => [`server-admit:${id}`, `server-check:${id}`, `server-end:${id}`, heartbeatKey(id)]) } } });
   await prisma.$disconnect();
 });
 
@@ -347,6 +349,32 @@ describe("admit", () => {
     await prisma.officialServer.update({ where: { id: s.id }, data: { protocolVersion: 4 } });
     const stale = await makeTicket(u, s);
     await denied(s, admitBody(stale.ticket, { protocol_version: 4 }), "build_mismatch");
+  });
+
+  it("admits against family and protocol adopted by a new-process heartbeat", async () => {
+    const s = await makeServer();
+    const u = await makeUser();
+    const newFamily = `${family}-next`;
+    const newNonce = "m".repeat(20);
+    const hb = await heartbeat.POST(new NextRequest(new URL("/api/servers/heartbeat", BASE), {
+      method: "POST",
+      headers: new Headers({ authorization: `TwazServer ${s.id}.${s.secret}`, "content-type": "application/json" }),
+      body: JSON.stringify({
+        game_build: "0.60-linux", build_family: newFamily, protocol_version: 4, server_runtime: "linux-x64",
+        instance_nonce: newNonce, players: 0, maxPlayers: 16,
+      }),
+    }));
+    expect(hb.status).toBe(200);
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id: s.id } })).toMatchObject({
+      buildFamily: newFamily, protocolVersion: 4, instanceNonce: newNonce,
+    });
+
+    const stale = await makeTicket(u, s);
+    await denied(s, admitBody(stale.ticket, { instance_nonce: newNonce, build_family: newFamily, protocol_version: 4 }), "build_mismatch");
+    const t = await makeTicket(u, s, { buildFamily: newFamily, protocolVersion: 4 });
+    const res = await doAdmit(s, admitBody(t.ticket, { instance_nonce: newNonce, build_family: newFamily, protocol_version: 4 }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).admitted).toBe(true);
   });
 
   it("rejects a ticket that expires while waiting for the server lock", async () => {

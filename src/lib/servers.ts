@@ -7,6 +7,7 @@ export const SERVER_AUDIT = {
   rotated: "SERVER_SECRET_ROTATED",
   disabled: "SERVER_DISABLED",
   compatUpdated: "SERVER_COMPAT_UPDATED",
+  compatAdopted: "SERVER_COMPAT_ADOPTED",
   // Admission audit names; issued by join-ticket, admit and sessions/*.
   ticketIssued: "TICKET_ISSUED",
   admitOk: "ADMIT_OK",
@@ -14,6 +15,36 @@ export const SERVER_AUDIT = {
   ticketReuse: "TICKET_REUSE",
   playerKick: "PLAYER_KICK",
 } as const;
+
+export type HeartbeatBuildDecision =
+  | { kind: "ok" }
+  | { kind: "mismatch" }
+  | {
+      kind: "adopt";
+      oldBuildFamily: string;
+      newBuildFamily: string;
+      oldProtocolVersion: number;
+      newProtocolVersion: number;
+    };
+
+/** A new process (nonce change, including the first heartbeat) may adopt family/protocol; the same process may not. */
+export function decideHeartbeatBuild(
+  stored: { instanceNonce: string | null; buildFamily: string; protocolVersion: number },
+  reported: { instance_nonce: string; build_family: string; protocol_version: number },
+): HeartbeatBuildDecision {
+  const changed = stored.buildFamily !== reported.build_family || stored.protocolVersion !== reported.protocol_version;
+  if (!changed) return { kind: "ok" };
+  if (stored.instanceNonce !== reported.instance_nonce) {
+    return {
+      kind: "adopt",
+      oldBuildFamily: stored.buildFamily,
+      newBuildFamily: reported.build_family,
+      oldProtocolVersion: stored.protocolVersion,
+      newProtocolVersion: reported.protocol_version,
+    };
+  }
+  return { kind: "mismatch" };
+}
 
 export const CLIENT_PLATFORMS = ["win-x64", "linux-x64"] as const;
 export const HEARTBEAT_LIMIT = { perServer: 4, windowMs: 60_000 } as const;

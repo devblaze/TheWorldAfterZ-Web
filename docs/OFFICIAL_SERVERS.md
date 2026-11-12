@@ -12,6 +12,9 @@ Public update feeds and the gated first-install download are unchanged.
 servers, rotates credentials, disables servers, and updates build compatibility.
 Name, region, host, port, game build, build family, protocol version, and allowed client
 platforms are required on create. Client platforms are win-x64 and/or linux-x64.
+Registered build_family and protocol_version then follow the server's heartbeat on each
+new process start (a new instance_nonce). The admin compatibility edit still exists for
+manual updates and continues to write SERVER_COMPAT_UPDATED.
 
 Create and rotate show a 32-byte base64url secret once. Store it only in the dedicated
 host environment as TWAZ_SERVER_SECRET, with TWAZ_SERVER_ID and TWAZ_SITE_ORIGIN.
@@ -47,18 +50,26 @@ Responses are JSON, no-store, and never redirect:
 - 200 `{ok:true,checkedAt}` (ISO timestamp)
 - 400 `{error:"invalid_request"}`
 - 401 `{error:"invalid_server"}` for invalid, rotated or disabled credentials
-- 409 `{error:"build_mismatch"}`
+- 409 `{error:"build_mismatch"}` when the same running process reports a different
+  build_family or protocol_version
 - 429 `{error:"rate_limited"}` plus Retry-After (4 attempts/minute/server after auth)
 - 500 `{error:"server_error"}` (fail closed)
 
 Malformed and incompatible authenticated attempts consume rate-limit capacity. A locked
-transaction rechecks credentials and compatibility, records heartbeat state, and on a new
-nonce ends open sessions of other instances with reason server_restart. A rotation or
-disable committed before that transaction acquires its row lock wins.
+transaction rechecks credentials after acquiring the row lock. When instance_nonce
+differs from the stored nonce (a new server process, including the first heartbeat),
+the transaction adopts the reported build_family and protocol_version into the
+OfficialServer row, records reportedGameBuild as before, and ends open sessions of
+other instances with reason server_restart. Admit and join-ticket compatibility then
+use those updated row values. A change of family or protocol writes a
+SERVER_COMPAT_ADOPTED audit with the old and new values; the secret and Authorization
+header are never logged. When the nonce is unchanged and family or protocol differ,
+the site returns 409 and leaves the row unchanged. A rotation or disable committed
+before that transaction acquires its row lock wins. The admin compatibility edit
+still exists for manual updates (SERVER_COMPAT_UPDATED).
 
 The migration also prepares JoinTicket and ServerSession for later steps, including
-instance-scoped connection identities. Audit action names live in src/lib/servers.ts;
-compatibility updates use SERVER_COMPAT_UPDATED in addition to the planned actions.
+instance-scoped connection identities. Audit action names live in src/lib/servers.ts.
 
 ## Validation
 
