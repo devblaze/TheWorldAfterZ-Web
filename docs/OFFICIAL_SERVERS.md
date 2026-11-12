@@ -38,8 +38,10 @@ Send POST `/api/servers/heartbeat` over HTTPS with
 
 Send every 30 seconds. A server is online for 90 seconds after its latest accepted heartbeat.
 Only build_family and protocol_version affect compatibility; game_build and server_runtime
-are informational. The nonce must be 16–128 printable ASCII characters. Player counts must
-be integers in 0–10000 with players <= maxPlayers; the JSON body is limited to 4096 bytes.
+are informational. game_build is 1–128 printable ASCII (the same stamp length as directory,
+join-ticket and admit). server_runtime is 1–64 printable ASCII. The nonce must be 16–128
+printable ASCII characters. Player counts must be integers in 0–10000 with
+players <= maxPlayers; the JSON body is limited to 4096 bytes.
 
 Responses are JSON, no-store, and never redirect:
 - 200 `{ok:true,checkedAt}` (ISO timestamp)
@@ -114,7 +116,7 @@ The directory is a read snapshot, not a reservation or admission decision. A ser
 fill or be disabled after listing; join rechecks it and admit remains authoritative.
 Expired-ticket pruning is not implemented. Native-auth integration
 tests currently require a UTC test database; this implementation changes no production
-timezone settings. Freeze reference: TheWorldAfterZ aa21ca99, docs/OFFICIAL_DEDICATED_SERVER.md.
+timezone settings. Freeze reference: TheWorldAfterZ main after PR #21 (474dc2b), docs/OFFICIAL_DEDICATED_SERVER.md. The HTTP route contract is unchanged from aa21ca99 except heartbeat game_build (1–128, matching stamp/admit/join).
 
 ## Admit and session checks (steps 4 and 5)
 

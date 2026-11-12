@@ -43,10 +43,13 @@ describe("input validation", () => {
   it("accepts a well-formed heartbeat and rejects every bound", () => {
     expect(Heartbeat.safeParse(beat).success).toBe(true);
     expect(Heartbeat.safeParse({ ...beat, players: 16 }).success).toBe(true);
+    // Stamp length matches the contract $defs/stamp and admit/join (1–128), not the 64-char family cap.
+    expect(Heartbeat.safeParse({ ...beat, game_build: "a".repeat(128) }).success).toBe(true);
+    expect(Heartbeat.safeParse({ ...beat, game_build: "a".repeat(65) }).success).toBe(true);
     for (const patch of [
       { players: 17 }, { players: -1 }, { players: 1.5 }, { maxPlayers: 10_001 }, { players: "1" },
       { instance_nonce: "n".repeat(15) }, { instance_nonce: "n".repeat(129) }, { protocol_version: -1 }, { protocol_version: 1.2 },
-      { build_family: "" }, { game_build: undefined }, { server_runtime: "linux x64" },
+      { build_family: "" }, { game_build: undefined }, { game_build: "a".repeat(129) }, { server_runtime: "linux x64" },
     ]) {
       expect(Heartbeat.safeParse({ ...beat, ...patch }).success, JSON.stringify(patch)).toBe(false);
     }
