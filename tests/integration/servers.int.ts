@@ -110,7 +110,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await prisma.officialServer.deleteMany({ where: { id: { in: serverIds } } });
   await prisma.rateLimit.deleteMany({ where: { key: { in: serverIds.map(heartbeatKey) } } });
-  await prisma.auditLog.deleteMany({ where: { actorId: adminId } });
+  await prisma.auditLog.deleteMany({ where: { OR: [{ actorId: adminId }, { targetId: { in: serverIds } }] } });
   await prisma.user.deleteMany({ where: { email: { in: [admin.email, player.email] } } });
   await prisma.$disconnect();
 });
@@ -228,11 +228,97 @@ describe("heartbeat", () => {
     expect((await hb(id, newSecret, beat(nonce()))).status).toBe(200);
   });
 
-  it("409s a build_family or protocol mismatch without recording it", async () => {
+  it("adopts build_family and protocol_version from a new process, ends prior sessions and writes an audit", async () => {
     const { id, secret } = await createServer();
-    await expectError(await hb(id, secret, beat(nonce(), { build_family: "playtest-0.58" })), 409, "build_mismatch");
-    await expectError(await hb(id, secret, beat(nonce(), { protocol_version: 2 })), 409, "build_mismatch");
-    expect((await prisma.officialServer.findUniqueOrThrow({ where: { id } })).lastHeartbeatAt).toBeNull();
+    const first = nonce();
+    expect((await hb(id, secret, beat(first))).status).toBe(200);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: player.email } });
+    const ns = await prisma.nativeSession.create({
+      data: { userId: user.id, clientId: "twaz-launcher", absoluteExpiresAt: new Date(Date.now() + 3600e3), lastUsedAt: new Date(), idleExpiresAt: new Date(Date.now() + 3600e3) },
+    });
+    const ticket = () => prisma.joinTicket.create({
+      data: { ticketHash: sha256(nonce()), userId: user.id, nativeSessionId: ns.id, serverId: id, gameBuild: "0.59.1", buildFamily: "playtest-0.59", protocolVersion: 3, clientPlatform: "win-x64", expiresAt: new Date(Date.now() + 60e3) },
+    });
+    const old = await prisma.serverSession.create({ data: { serverId: id, userId: user.id, ticketId: (await ticket()).id, instanceNonce: first, connectionId: "1" } });
+
+    await resetLimit(id);
+    const second = nonce();
+    const err = vi.spyOn(console, "error");
+    const res = await hb(id, secret, beat(second, { build_family: "playtest-0.60", protocol_version: 4, game_build: "0.60.0-linux" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
+    expect(row).toMatchObject({
+      buildFamily: "playtest-0.60",
+      protocolVersion: 4,
+      instanceNonce: second,
+      reportedGameBuild: "0.60.0-linux",
+      gameBuild: "0.59.1",
+    });
+    expect(row.lastHeartbeatAt?.toISOString()).toBe(body.checkedAt);
+    expect(await prisma.serverSession.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ endReason: "server_restart" });
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SERVER_COMPAT_ADOPTED", targetId: id } });
+    expect(audit.actorId).toBeNull();
+    expect(audit.meta).toEqual({
+      oldBuildFamily: "playtest-0.59",
+      newBuildFamily: "playtest-0.60",
+      oldProtocolVersion: 3,
+      newProtocolVersion: 4,
+    });
+    expect(JSON.stringify(audit)).not.toContain(secret);
+    expect([...err.mock.calls].flat().join(" ")).not.toContain(secret);
+    err.mockRestore();
+    await prisma.nativeSession.delete({ where: { id: ns.id } });
+  });
+
+  it("409s when the same process reports a different family or protocol and leaves the row unchanged", async () => {
+    const { id, secret } = await createServer();
+    const n = nonce();
+    const first = await hb(id, secret, beat(n));
+    expect(first.status).toBe(200);
+    const before = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
+    await resetLimit(id);
+    await expectError(await hb(id, secret, beat(n, { build_family: "playtest-0.58" })), 409, "build_mismatch");
+    await resetLimit(id);
+    await expectError(await hb(id, secret, beat(n, { protocol_version: 2 })), 409, "build_mismatch");
+    const after = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
+    expect(after).toMatchObject({
+      buildFamily: "playtest-0.59",
+      protocolVersion: 3,
+      instanceNonce: n,
+      lastHeartbeatAt: before.lastHeartbeatAt,
+      reportedGameBuild: before.reportedGameBuild,
+    });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_COMPAT_ADOPTED", targetId: id } })).toBe(0);
+  });
+
+  it("does not audit or change family when a new process reports the registered values", async () => {
+    const { id, secret } = await createServer();
+    const first = nonce();
+    expect((await hb(id, secret, beat(first))).status).toBe(200);
+    await resetLimit(id);
+    const second = nonce();
+    expect((await hb(id, secret, beat(second))).status).toBe(200);
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      buildFamily: "playtest-0.59",
+      protocolVersion: 3,
+      instanceNonce: second,
+    });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_COMPAT_ADOPTED", targetId: id } })).toBe(0);
+  });
+
+  it("401s bad credentials before reading the body, even when the body would mismatch", async () => {
+    const { id } = await createServer();
+    const mismatched = beat(nonce(), { build_family: "playtest-0.58" });
+    await expectError(await heartbeat.POST(req("/api/servers/heartbeat", { body: JSON.stringify(mismatched) })), 401, "invalid_server");
+    await expectError(await hb(id, "B".repeat(43), mismatched), 401, "invalid_server");
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      buildFamily: "playtest-0.59",
+      protocolVersion: 3,
+      lastHeartbeatAt: null,
+    });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_COMPAT_ADOPTED", targetId: id } })).toBe(0);
   });
 
   it("400s malformed bodies after auth", async () => {

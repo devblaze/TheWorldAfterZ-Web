@@ -12,8 +12,10 @@ if (!process.env.LAUNCHER_TOKEN_SECRET || Buffer.byteLength(process.env.LAUNCHER
 
 const { prisma } = await import("@/lib/db");
 const { sha256 } = await import("@/lib/crypto");
+const { heartbeatKey } = await import("@/lib/servers");
 const { signAccessToken } = await import("@/lib/launcher/jwt");
 const { LAUNCHER_LIMITS, launcherDirectoryAccountKey, launcherJoinAccountKey, windowStart } = await import("@/lib/rate-limit");
+const heartbeat = await import("@/app/api/servers/heartbeat/route");
 const directory = await import("@/app/api/launcher/servers/route");
 const join = await import("@/app/api/launcher/join-ticket/route");
 
@@ -105,9 +107,10 @@ beforeEach(resetLimits);
 
 afterAll(async () => {
   await prisma.officialServer.deleteMany({ where: { id: { in: serverIds } } });
-  await prisma.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
+  await prisma.auditLog.deleteMany({ where: { OR: [{ actorId: { in: userIds } }, { targetId: { in: serverIds } }] } });
   await prisma.user.deleteMany({ where: { email: { in: emails } } });
   await prisma.accessKey.deleteMany({ where: { batchLabel: batch } });
+  await prisma.rateLimit.deleteMany({ where: { key: { in: serverIds.map(heartbeatKey) } } });
   await resetLimits();
   await prisma.$disconnect();
 });
@@ -184,6 +187,38 @@ describe("GET /api/launcher/servers", () => {
     const winBlocked = `${family}-lin`;
     await makeServer({ buildFamily: winBlocked, clientPlatforms: ["linux-x64"] });
     expect((await (await list(entitled.token, { ...query, build_family: winBlocked })).json()).servers).toEqual([]);
+  });
+
+  it("lists and issues tickets against the family adopted by a new-process heartbeat", async () => {
+    const secret = randomBytes(32).toString("base64url");
+    const s = await makeServer({ secretHash: sha256(secret), instanceNonce: "o".repeat(16) });
+    const newFamily = `${family}-hb`;
+    const newNonce = "p".repeat(16);
+    const hb = await heartbeat.POST(new NextRequest(new URL("/api/servers/heartbeat", BASE), {
+      method: "POST",
+      headers: new Headers({ authorization: `TwazServer ${s.id}.${secret}`, "content-type": "application/json" }),
+      body: JSON.stringify({
+        game_build: "0.60-linux", build_family: newFamily, protocol_version: 4, server_runtime: "linux-x64",
+        instance_nonce: newNonce, players: 1, maxPlayers: 16,
+      }),
+    }));
+    expect(hb.status).toBe(200);
+
+    const oldList = await (await list(entitled.token)).json();
+    expect(oldList.servers.map((row: { id: string }) => row.id)).not.toContain(s.id);
+    const newList = await (await list(entitled.token, { ...query, build_family: newFamily, protocol_version: "4" })).json();
+    expect(newList.servers.map((row: { id: string; buildFamily: string; protocolVersion: number }) => row)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: s.id, buildFamily: newFamily, protocolVersion: 4 })]),
+    );
+    await expectDeny(await freshTicket(entitled.token, joinBody(s.id)), "build_mismatch");
+    const issued = await freshTicket(entitled.token, joinBody(s.id, { build_family: newFamily, protocol_version: 4 }));
+    expect(issued.status).toBe(200);
+    const body = await issued.json();
+    expect(body).toMatchObject({ serverId: s.id, build_family: newFamily, protocol_version: 4 });
+    expect(body.ticket).toEqual(expect.any(String));
+    // Later tests count TICKET_ISSUED rows for this account; remove the one this case wrote.
+    await prisma.auditLog.deleteMany({ where: { actorId: entitled.id, action: "TICKET_ISSUED", targetId: { not: null } } });
+    await prisma.joinTicket.deleteMany({ where: { serverId: s.id } });
   });
 
   it("caps at 64 rows in a deterministic order", async () => {

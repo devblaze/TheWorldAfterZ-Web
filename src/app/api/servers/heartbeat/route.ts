@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { methodNotAllowed, launcherJson as noStoreJson, readJsonBody } from "@/lib/launcher/http";
 import { rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches } from "@/lib/servers";
+import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches, SERVER_AUDIT } from "@/lib/servers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,7 +36,8 @@ export async function POST(req: Request) {
         SELECT "status"::text AS "status", "secretHash", "buildFamily", "protocolVersion", "instanceNonce"
         FROM "OfficialServer" WHERE "id" = ${cred.serverId} FOR UPDATE`;
       if (!s || s.status !== "ACTIVE" || !secretMatches(cred.secret, s.secretHash)) return "invalid_server" as const;
-      if (s.buildFamily !== b.build_family || s.protocolVersion !== b.protocol_version) return "build_mismatch" as const;
+      const decision = decideHeartbeatBuild(s, b);
+      if (decision.kind === "mismatch") return "build_mismatch" as const;
       const now = new Date();
       if (s.instanceNonce !== b.instance_nonce) {
         // New process: every open session not belonging to it is gone.
@@ -54,8 +55,26 @@ export async function POST(req: Request) {
           serverRuntime: b.server_runtime,
           players: b.players,
           maxPlayers: b.maxPlayers,
+          ...(decision.kind === "adopt"
+            ? { buildFamily: b.build_family, protocolVersion: b.protocol_version }
+            : {}),
         },
       });
+      if (decision.kind === "adopt") {
+        await tx.auditLog.create({
+          data: {
+            actorId: null,
+            action: SERVER_AUDIT.compatAdopted,
+            targetId: cred.serverId,
+            meta: {
+              oldBuildFamily: decision.oldBuildFamily,
+              newBuildFamily: decision.newBuildFamily,
+              oldProtocolVersion: decision.oldProtocolVersion,
+              newProtocolVersion: decision.newProtocolVersion,
+            },
+          },
+        });
+      }
       return now;
     });
     if (result === "invalid_server") return invalidServer();

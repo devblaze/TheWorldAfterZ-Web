@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { sha256 } from "../src/lib/crypto";
-import { CreateServer, Heartbeat, newServerSecret, parseServerAuth, secretMatches } from "../src/lib/servers";
+import { CreateServer, decideHeartbeatBuild, Heartbeat, newServerSecret, parseServerAuth, secretMatches } from "../src/lib/servers";
 
 // Any DB access throws, to prove the heartbeat fails closed.
 vi.mock("@/lib/db", () => ({
@@ -65,6 +65,35 @@ describe("input validation", () => {
     ]) {
       expect(CreateServer.safeParse({ ...server, ...patch }).success, JSON.stringify(patch)).toBe(false);
     }
+  });
+});
+
+describe("heartbeat build adoption", () => {
+  const stored = { instanceNonce: "old-nonce-16chars", buildFamily: "playtest-0.59", protocolVersion: 3 };
+  const reported = { instance_nonce: stored.instanceNonce, build_family: stored.buildFamily, protocol_version: stored.protocolVersion };
+
+  it("adopts family and protocol when the nonce belongs to a new process", () => {
+    expect(decideHeartbeatBuild(stored, { ...reported, instance_nonce: "new-nonce-16chars", build_family: "playtest-0.60", protocol_version: 4 })).toEqual({
+      kind: "adopt",
+      oldBuildFamily: "playtest-0.59",
+      newBuildFamily: "playtest-0.60",
+      oldProtocolVersion: 3,
+      newProtocolVersion: 4,
+    });
+    expect(decideHeartbeatBuild({ ...stored, instanceNonce: null }, { ...reported, build_family: "playtest-0.60" })).toMatchObject({
+      kind: "adopt",
+      newBuildFamily: "playtest-0.60",
+    });
+  });
+
+  it("returns 409-equivalent mismatch when the same process reports a different family or protocol", () => {
+    expect(decideHeartbeatBuild(stored, { ...reported, build_family: "playtest-0.60" })).toEqual({ kind: "mismatch" });
+    expect(decideHeartbeatBuild(stored, { ...reported, protocol_version: 4 })).toEqual({ kind: "mismatch" });
+  });
+
+  it("leaves family and protocol alone when a new or same process reports the registered values", () => {
+    expect(decideHeartbeatBuild(stored, reported)).toEqual({ kind: "ok" });
+    expect(decideHeartbeatBuild(stored, { ...reported, instance_nonce: "new-nonce-16chars" })).toEqual({ kind: "ok" });
   });
 });
 
