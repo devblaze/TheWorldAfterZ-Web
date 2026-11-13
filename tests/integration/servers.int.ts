@@ -21,6 +21,7 @@ const create = await import("@/app/api/admin/servers/route");
 const rotate = await import("@/app/api/admin/servers/[id]/rotate/route");
 const disable = await import("@/app/api/admin/servers/[id]/disable/route");
 const compat = await import("@/app/api/admin/servers/[id]/compat/route");
+const endpoint = await import("@/app/api/admin/servers/[id]/endpoint/route");
 const heartbeat = await import("@/app/api/servers/heartbeat/route");
 const AdminServersPage = (await import("@/app/admin/servers/page")).default;
 
@@ -123,6 +124,7 @@ describe("admin server management", () => {
       expect((await rotate.POST(req(`/api/admin/servers/${fakeId}/rotate`, { jar, json: {} }), params(fakeId))).status).toBe(403);
       expect((await disable.POST(req(`/api/admin/servers/${fakeId}/disable`, { jar, json: {} }), params(fakeId))).status).toBe(403);
       expect((await compat.POST(req(`/api/admin/servers/${fakeId}/compat`, { jar, json: {} }), params(fakeId))).status).toBe(403);
+      expect((await endpoint.POST(req(`/api/admin/servers/${fakeId}/endpoint`, { jar, json: {} }), params(fakeId))).status).toBe(403);
     }
     req("/admin/servers");
     await expect(AdminServersPage()).rejects.toMatchObject({ digest: expect.stringContaining("/login") });
@@ -172,6 +174,56 @@ describe("admin server management", () => {
     expect(await prisma.auditLog.count({ where: { action: "SERVER_COMPAT_UPDATED", targetId: id } })).toBe(1);
     expect((await compat.POST(req(`/api/admin/servers/${id}/compat`, { jar: adminJar, json: { buildFamily: "x" } }), params(id))).status).toBe(400);
     expect((await compat.POST(req("/api/admin/servers/nosuch/compat", { jar: adminJar, json: { gameBuild: "1", buildFamily: "f", protocolVersion: 1, clientPlatforms: ["win-x64"] } }), params("nosuch"))).status).toBe(404);
+  });
+
+  it("updates host and port, audits it, and expires unused tickets without ending sessions or rotating the secret", async () => {
+    const { id, secret } = await createServer();
+    const before = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
+    const ns = await prisma.nativeSession.create({
+      data: {
+        userId: adminId, clientId: `endpoint-${run}`,
+        absoluteExpiresAt: new Date(Date.now() + 60_000), lastUsedAt: new Date(), idleExpiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const liveTicket = await prisma.joinTicket.create({
+      data: {
+        ticketHash: sha256(`live-${run}`), userId: adminId, nativeSessionId: ns.id, serverId: id,
+        gameBuild: "0.59.1", buildFamily: "playtest-0.59", protocolVersion: 3, clientPlatform: "win-x64",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+    const usedTicket = await prisma.joinTicket.create({
+      data: {
+        ticketHash: sha256(`used-${run}`), userId: adminId, nativeSessionId: ns.id, serverId: id,
+        gameBuild: "0.59.1", buildFamily: "playtest-0.59", protocolVersion: 3, clientPlatform: "win-x64",
+        expiresAt: new Date(Date.now() + 60_000), usedAt: new Date(),
+      },
+    });
+    const session = await prisma.serverSession.create({
+      data: { serverId: id, userId: adminId, ticketId: usedTicket.id, instanceNonce: "n".repeat(16), connectionId: "1" },
+    });
+
+    const res = await endpoint.POST(req(`/api/admin/servers/${id}/endpoint`, { jar: adminJar, json: { host: "192.168.4.34", port: 7778 } }), params(id));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
+    expect(row).toMatchObject({ host: "192.168.4.34", port: 7778, secretHash: before.secretHash });
+    const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SERVER_ENDPOINT_CHANGED", targetId: id } });
+    expect(audit.meta).toEqual({ oldHost: "play.example.org", oldPort: 7777, newHost: "192.168.4.34", newPort: 7778 });
+    expect(JSON.stringify(audit)).not.toContain(secret);
+    expect((await prisma.joinTicket.findUniqueOrThrow({ where: { id: liveTicket.id } })).expiresAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(await prisma.joinTicket.findUniqueOrThrow({ where: { id: usedTicket.id } })).toMatchObject({ usedAt: expect.any(Date) });
+    expect((await prisma.joinTicket.findUniqueOrThrow({ where: { id: usedTicket.id } })).expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect(await prisma.serverSession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ endedAt: null, endReason: null });
+
+    expect((await endpoint.POST(req(`/api/admin/servers/${id}/endpoint`, { jar: adminJar, json: { host: "x.org/evil", port: 7777 } }), params(id))).status).toBe(400);
+    expect((await endpoint.POST(req(`/api/admin/servers/${id}/endpoint`, { jar: adminJar, json: { host: "play.example.org", port: 70000 } }), params(id))).status).toBe(400);
+    expect((await endpoint.POST(req("/api/admin/servers/nosuch/endpoint", { jar: adminJar, json: { host: "play.example.org", port: 7777 } }), params("nosuch"))).status).toBe(404);
+    expect((await prisma.officialServer.findUniqueOrThrow({ where: { id } })).host).toBe("192.168.4.34");
+
+    await prisma.serverSession.delete({ where: { id: session.id } });
+    await prisma.joinTicket.deleteMany({ where: { id: { in: [liveTicket.id, usedTicket.id] } } });
+    await prisma.nativeSession.delete({ where: { id: ns.id } });
   });
 });
 

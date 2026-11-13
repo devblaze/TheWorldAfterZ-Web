@@ -8,6 +8,7 @@ export const SERVER_AUDIT = {
   disabled: "SERVER_DISABLED",
   compatUpdated: "SERVER_COMPAT_UPDATED",
   compatAdopted: "SERVER_COMPAT_ADOPTED",
+  endpointChanged: "SERVER_ENDPOINT_CHANGED",
   // Admission audit names; issued by join-ticket, admit and sessions/*.
   ticketIssued: "TICKET_ISSUED",
   admitOk: "ADMIT_OK",
@@ -99,11 +100,16 @@ export const Compat = z.object({
     .refine((a) => new Set(a).size === a.length, "duplicate platform"),
 });
 
+const host = z.string().trim().toLowerCase().max(253).refine((h) => HOST_RE.test(h) || z.ipv6().safeParse(h).success, "invalid host");
+const port = z.number().int().min(1).max(65535);
+
+export const Endpoint = z.object({ host, port });
+
 export const CreateServer = Compat.extend({
   name: label(64),
   region: label(32),
-  host: z.string().trim().toLowerCase().max(253).refine((h) => HOST_RE.test(h) || z.ipv6().safeParse(h).success, "invalid host"),
-  port: z.number().int().min(1).max(65535),
+  host,
+  port,
 });
 
 const nonce = z.string().min(16).max(128).regex(/^[\x21-\x7e]+$/);

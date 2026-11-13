@@ -85,7 +85,7 @@ export function CreateServerForm() {
   );
 }
 
-export function ServerActions({ server }: { server: { id: string; active: boolean; gameBuild: string; buildFamily: string; protocolVersion: number; clientPlatforms: string[] } }) {
+export function ServerActions({ server }: { server: { id: string; active: boolean; host: string; port: number; gameBuild: string; buildFamily: string; protocolVersion: number; clientPlatforms: string[] } }) {
   const router = useRouter();
   const [rotated, setRotated] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -104,11 +104,25 @@ export function ServerActions({ server }: { server: { id: string; active: boolea
     if (res?.ok) router.refresh();
   }
 
+  async function updateEndpoint(form: FormData) {
+    const host = String(form.get("host") ?? "");
+    const port = Number(form.get("port"));
+    if (!confirm(`Change this server's address to ${host}:${port}? Unexpired join tickets will expire. Open sessions and the secret stay the same.`)) return;
+    const res = await post(`/api/admin/servers/${server.id}/endpoint`, { host, port });
+    setMsg(res?.ok ? "Address updated." : "Update failed. Check the inputs.");
+    if (res?.ok) router.refresh();
+  }
+
   if (rotated) return <SecretOnce id={server.id} secret={rotated} onDone={() => setRotated(null)} />;
   if (!server.active) return <span className="text-stone-500">disabled</span>;
   return (
     <div className="space-y-2">
       <form action={updateCompat} className="flex flex-wrap items-end gap-2"><CompatFields d={server} /><button className={button}>Save</button></form>
+      <form action={updateEndpoint} className="flex flex-wrap items-end gap-2">
+        <label className="text-sm">Host<input className={input} name="host" required maxLength={253} defaultValue={server.host} /></label>
+        <label className="text-sm">Port<input className={input} name="port" type="number" min={1} max={65535} required defaultValue={server.port} /></label>
+        <button className={button}>Save address</button>
+      </form>
       <div className="flex gap-2">
         <button className={buttonDanger} onClick={() => act("rotate", "Rotate the secret? The old one stops working immediately.")}>Rotate secret</button>
         <button className={buttonDanger} onClick={() => act("disable", "Disable this server? All its calls will be refused.")}>Disable</button>

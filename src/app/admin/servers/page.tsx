@@ -60,7 +60,7 @@ export default async function AdminServers() {
                         </>
                       ) : "never"}
                     </td>
-                    <td><ServerActions server={{ id: s.id, active: s.status === "ACTIVE", gameBuild: s.gameBuild, buildFamily: s.buildFamily, protocolVersion: s.protocolVersion, clientPlatforms: s.clientPlatforms }} /></td>
+                    <td><ServerActions server={{ id: s.id, active: s.status === "ACTIVE", host: s.host, port: s.port, gameBuild: s.gameBuild, buildFamily: s.buildFamily, protocolVersion: s.protocolVersion, clientPlatforms: s.clientPlatforms }} /></td>
                   </tr>
                 );
               })}
