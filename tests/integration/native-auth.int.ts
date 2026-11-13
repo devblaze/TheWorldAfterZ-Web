@@ -628,7 +628,8 @@ describe("play-check", () => {
     expect(body.platform).toBe(" Linux ");
     expect(body.checkedAt).toBe(new Date(body.checkedAt).toISOString());
     expect(new Date(body.expiresAt).getTime() - new Date(body.checkedAt).getTime()).toBe(30_000);
-    expect(Object.keys(body).sort()).toEqual(["accountId", "checkedAt", "entitled", "expiresAt", "game_build", "nonce", "platform", "reason"]);
+    expect(Object.keys(body).sort()).toEqual(["accountId", "checkedAt", "entitled", "expiresAt", "game_build", "nonce", "platform", "reason", "role"]);
+    expect(body.role).toBe("player");
 
     const numeric = await play(tokens.access_token, { game_build: 42, platform: false, nonce: "n".repeat(16) });
     expect(await numeric.json()).toMatchObject({ game_build: 42, platform: false, nonce: "n".repeat(16) });
