@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { sha256 } from "../src/lib/crypto";
-import { CreateServer, Endpoint, decideHeartbeatBuild, Heartbeat, newServerSecret, parseServerAuth, secretMatches } from "../src/lib/servers";
+import {
+  Capacity, CreateServer, Endpoint, decideHeartbeatBuild, effectiveCapacity, Heartbeat, LauncherCreateServer, newServerSecret, parseServerAuth,
+  secretMatches, serverStatus,
+} from "../src/lib/servers";
 
 // Any DB access throws, to prove the heartbeat fails closed.
 vi.mock("@/lib/db", () => ({
@@ -144,5 +147,43 @@ describe("heartbeat route", () => {
     const res = await POST(new NextRequest("http://localhost:3000/api/servers/heartbeat", { method: "POST", body: "{}" }));
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "invalid_server" });
+  });
+});
+
+describe("capacity", () => {
+  it("accepts integers 1-64 only, strictly", () => {
+    for (const n of [1, 16, 64]) expect(Capacity.safeParse({ maxPlayers: n }).success).toBe(true);
+    for (const b of [{ maxPlayers: 0 }, { maxPlayers: 65 }, { maxPlayers: 1.5 }, { maxPlayers: "8" }, {}, { maxPlayers: 8, x: 1 }]) {
+      expect(Capacity.safeParse(b).success).toBe(false);
+    }
+  });
+  it("defaults web create to 64 and bounds it", () => {
+    expect(CreateServer.parse(server).maxPlayers).toBe(64);
+    expect(CreateServer.parse({ ...server, maxPlayers: 10 }).maxPlayers).toBe(10);
+    expect(CreateServer.safeParse({ ...server, maxPlayers: 65 }).success).toBe(false);
+  });
+  it("in-game create requires a capacity and rejects unknown or build fields", () => {
+    const base = { name: "EU 2", region: "eu", host: "192.168.4.34", port: 7777, maxPlayers: 32 };
+    expect(LauncherCreateServer.parse(base)).toEqual(base);
+    const noCap: Record<string, unknown> = { ...base };
+    delete noCap.maxPlayers;
+    for (const b of [noCap, { ...base, secretHash: "x" }, { ...base, buildFamily: "x" }, { ...base, maxPlayers: 0 }, { ...base, port: 0 }]) {
+      expect(LauncherCreateServer.safeParse(b).success).toBe(false);
+    }
+  });
+  it("effective capacity is the admin cap, tightened by a reported cap", () => {
+    expect(effectiveCapacity({ adminMaxPlayers: 64, maxPlayers: 0 })).toBe(64);
+    expect(effectiveCapacity({ adminMaxPlayers: 64, maxPlayers: 8 })).toBe(8);
+    expect(effectiveCapacity({ adminMaxPlayers: 16, maxPlayers: 100 })).toBe(16);
+  });
+  it("status is pending until a secret exists and a heartbeat arrived", () => {
+    const at = new Date();
+    expect(serverStatus({ status: "ACTIVE", secretHash: null, lastHeartbeatAt: null })).toBe("pending");
+    expect(serverStatus({ status: "ACTIVE", secretHash: "h", lastHeartbeatAt: null })).toBe("pending");
+    expect(serverStatus({ status: "ACTIVE", secretHash: "h", lastHeartbeatAt: at })).toBe("active");
+    expect(serverStatus({ status: "DISABLED", secretHash: "h", lastHeartbeatAt: at })).toBe("disabled");
+  });
+  it("a null stored hash never matches", () => {
+    expect(secretMatches("A".repeat(43), null)).toBe(false);
   });
 });

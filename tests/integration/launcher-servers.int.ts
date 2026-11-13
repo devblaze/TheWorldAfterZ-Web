@@ -162,13 +162,14 @@ describe("GET /api/launcher/servers", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("location")).toBeNull();
     const body = await res.json();
-    expect(Object.keys(body).sort()).toEqual(["checkedAt", "servers"]);
+    expect(Object.keys(body).sort()).toEqual(["checkedAt", "role", "servers"]);
+    expect(body.role).toBe("player");
     expect(body.checkedAt).toBe(new Date(body.checkedAt).toISOString());
     const ids = body.servers.map((s: { id: string }) => s.id);
     expect(ids).toEqual([good.id]);
     expect(body.servers[0]).toEqual({
       id: good.id, name: good.name, region: "aa", host: "play.example.org", port: 7777, buildFamily: fam, protocolVersion: 3,
-      players: 1, maxPlayers: 16, online: true,
+      players: 1, maxPlayers: 16, online: true, canManage: false,
     });
     const text = JSON.stringify(body);
     for (const leak of [good.secretHash, "secretHash", "linux-x64", "0.59.1-linux", "n".repeat(16), "instanceNonce", "status"]) expect(text).not.toContain(leak);

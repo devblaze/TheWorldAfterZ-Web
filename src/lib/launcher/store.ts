@@ -223,7 +223,9 @@ export async function rotateRefreshToken(input: { refreshToken: string; clientId
   }, { timeout: 10_000 });
 }
 
-export type AccessOk = { ok: true; userId: string; email: string; emailVerifiedAt: Date | null; sessionId: string; claims: AccessClaims };
+export type AccessOk = {
+  ok: true; userId: string; email: string; emailVerifiedAt: Date | null; role: string; sessionId: string; claims: AccessClaims;
+};
 export type AccessErr = { ok: false; error: "invalid_token" | "session_revoked" | "password_changed" };
 
 /** Reads `Authorization: Bearer <token>`; null when absent or malformed. */
@@ -251,6 +253,7 @@ export async function authenticateAccess(token: string, db: Tx | typeof prisma =
     userId: user.id,
     email: user.email,
     emailVerifiedAt: user.emailVerifiedAt,
+    role: user.role,
     sessionId: session.id,
     claims,
   };

@@ -34,6 +34,39 @@ The site stores SHA-256 only; it needs no per-server environment variables. Rota
 invalidates the old credential immediately. Disable is one-way and also ends open sessions.
 The registry is admin-only; there is no public listing.
 
+## Capacity and in-game hosting
+
+Each server has an admin-set capacity, `adminMaxPlayers` (1–64, default 64; existing
+rows were migrated to 64). It is authoritative: the heartbeat 200 returns it as
+maxPlayers and the dedicated server enforces it live. The heartbeat body's maxPlayers
+is still validated and recorded (`maxPlayers` column) but never overrides the admin
+value; the directory and join-ticket use min(admin, reported) so the site never hands
+out a seat the running process would refuse. The admin page shows and edits the
+capacity (POST `/api/admin/servers/[id]/capacity` `{maxPlayers}`, admin web session)
+and the create form takes it. Every change writes SERVER_CAPACITY_CHANGED with old and
+new values and source web|launcher.
+
+Role claim. POST `/api/launcher/play-check` and GET `/api/launcher/servers` include
+`role`: "admin" or "player" ("owner" is reserved, not emitted). It is "admin" only when
+the live native session's account is verified, has the ADMIN role in the database and
+is still listed in ADMIN_EMAILS; anything else, including unset ADMIN_EMAILS, is
+"player". It is a UI hint: every admin route re-checks it from the database.
+
+In-game admin routes (launcher `Authorization: Bearer <access token>`, never cookies,
+so the proxy exempts them from the browser Origin check; per-account limit 10/min,
+counted before the role check):
+- POST `/api/launcher/admin/servers` `{name, region, host, port, maxPlayers}` (strict;
+  same rules as the web create) → 201 `{serverId,name,region,host,port,maxPlayers,status:"pending"}`.
+  The row is created with NO credential (secretHash null) and placeholder compat
+  (family/build "pending", protocol 1, both client platforms) that the first heartbeat
+  of a new process adopts. No secret is ever generated or returned on this path; the
+  operator generates it on `/admin/servers` ("Generate secret", shown once) and puts
+  it in the host env. Audited SERVER_CREATED with source "launcher".
+- PATCH `/api/launcher/admin/servers/{serverId}` `{maxPlayers}` → 200 `{serverId,maxPlayers}`.
+Errors: 401 invalid_token|session_revoked|password_changed, 403 forbidden (not admin),
+429 rate_limited with Retry-After, 400 invalid_request (not JSON / too large),
+422 `{error:"validation_failed",fields:[...]}`, 404 not_found (PATCH), 500 server_error.
+
 ## Heartbeat contract
 
 Send POST `/api/servers/heartbeat` over HTTPS with
@@ -59,7 +92,8 @@ printable ASCII characters. Player counts must be integers in 0–10000 with
 players <= maxPlayers; the JSON body is limited to 4096 bytes.
 
 Responses are JSON, no-store, and never redirect:
-- 200 `{ok:true,checkedAt}` (ISO timestamp)
+- 200 `{ok:true,checkedAt,maxPlayers}` (ISO timestamp; maxPlayers is the admin-set capacity,
+  1–64, which the dedicated server enforces live. Until its first 200 the server uses its own config.)
 - 400 `{error:"invalid_request"}`
 - 401 `{error:"invalid_server"}` for invalid, rotated or disabled credentials
 - 409 `{error:"build_mismatch"}` when the same running process reports a different
@@ -105,8 +139,10 @@ unverified/no-key accounts get 403 unverified/no_key respectively. Only ACTIVE s
 with a heartbeat within 90 seconds, matching family/protocol, and an allowed client
 platform appear. Mismatch gives 200 with an empty list, never 409. At most 64 rows
 are returned, sorted by region/name/id. Fields are id, name, region, host, port,
-buildFamily, protocolVersion, players, maxPlayers, online (always true), plus a
-response checkedAt ISO timestamp. No credentials or runtime fields are exposed.
+buildFamily, protocolVersion, players, maxPlayers, online (always true), canManage, plus
+response role and checkedAt. maxPlayers is the effective capacity: the admin-set value,
+tightened by the last heartbeat-reported value when that is lower. canManage is true on
+every row only when role is "admin". No credentials or runtime fields are exposed.
 
 POST `/api/launcher/join-ticket` takes JSON serverId, the four build fields above,
 and nonce (16–128 characters from A-Z/a-z/0-9/underscore/hyphen). serverId uses the
@@ -118,7 +154,7 @@ After native auth, the business denials are evaluated in this order and return
 3. server_not_found (unknown or DISABLED)
 4. server_offline (missing or stale heartbeat)
 5. build_mismatch (family/protocol/client platform)
-6. server_full (last heartbeat players >= maxPlayers)
+6. server_full (last heartbeat players >= effective capacity, see the directory above)
 
 Entitlement is checked before the server lookup. Join never returns 404 or 409.
 Success contains ticket, serverId, accountId, nonce, the four echoed build fields,

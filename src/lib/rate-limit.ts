@@ -47,6 +47,8 @@ export const LAUNCHER_LIMITS = {
   // Per minute, per account, separate buckets (ADMISSION freeze).
   directory: { account: 30, windowMs: MIN },
   join: { account: 10, windowMs: MIN },
+  // In-game admin actions (create server, set capacity), counted before the role check.
+  admin: { account: 10, windowMs: MIN },
 } as const;
 
 export const launcherTokenIpKey = (ip: string) => `launcher-token:ip:${ip}`;
@@ -58,6 +60,7 @@ export const launcherPlayAccountKey = (accountId: string) => `launcher-play:acct
 export const launcherAuthorizeAccountKey = (userId: string) => `launcher-authorize:acct:${userId}`;
 export const launcherDirectoryAccountKey = (userId: string) => `launcher-directory:acct:${userId}`;
 export const launcherJoinAccountKey = (userId: string) => `launcher-join:acct:${userId}`;
+export const launcherAdminAccountKey = (userId: string) => `launcher-admin:acct:${userId}`;
 
 export const limitLauncherTokenIp = (ip: string) => {
   const l = LAUNCHER_LIMITS.token;
@@ -105,6 +108,11 @@ export const limitLauncherDirectory = (userId: string) => {
 export const limitLauncherJoin = (userId: string) => {
   const l = LAUNCHER_LIMITS.join;
   return rateLimit(launcherJoinAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
+};
+
+export const limitLauncherAdmin = (userId: string) => {
+  const l = LAUNCHER_LIMITS.admin;
+  return rateLimit(launcherAdminAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
 };
 
 export const LIMITS = {

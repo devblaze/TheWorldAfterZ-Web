@@ -22,6 +22,7 @@ const rotate = await import("@/app/api/admin/servers/[id]/rotate/route");
 const disable = await import("@/app/api/admin/servers/[id]/disable/route");
 const compat = await import("@/app/api/admin/servers/[id]/compat/route");
 const endpoint = await import("@/app/api/admin/servers/[id]/endpoint/route");
+const capacityRoute = await import("@/app/api/admin/servers/[id]/capacity/route");
 const heartbeat = await import("@/app/api/servers/heartbeat/route");
 const AdminServersPage = (await import("@/app/admin/servers/page")).default;
 
@@ -125,6 +126,7 @@ describe("admin server management", () => {
       expect((await disable.POST(req(`/api/admin/servers/${fakeId}/disable`, { jar, json: {} }), params(fakeId))).status).toBe(403);
       expect((await compat.POST(req(`/api/admin/servers/${fakeId}/compat`, { jar, json: {} }), params(fakeId))).status).toBe(403);
       expect((await endpoint.POST(req(`/api/admin/servers/${fakeId}/endpoint`, { jar, json: {} }), params(fakeId))).status).toBe(403);
+      expect((await capacityRoute.POST(req(`/api/admin/servers/${fakeId}/capacity`, { jar, json: { maxPlayers: 8 } }), params(fakeId))).status).toBe(403);
     }
     req("/admin/servers");
     await expect(AdminServersPage()).rejects.toMatchObject({ digest: expect.stringContaining("/login") });
@@ -134,7 +136,7 @@ describe("admin server management", () => {
   });
 
   it("rejects invalid input without creating anything", async () => {
-    for (const bad of [{ port: 70000 }, { host: "x.org/evil" }, { clientPlatforms: ["osx"] }, { protocolVersion: "3" }, { name: "" }]) {
+    for (const bad of [{ port: 70000 }, { host: "x.org/evil" }, { clientPlatforms: ["osx"] }, { protocolVersion: "3" }, { name: "" }, { maxPlayers: 0 }, { maxPlayers: 65 }]) {
       expect((await create.POST(req("/api/admin/servers", { jar: adminJar, json: { ...serverInput, ...bad } }))).status).toBe(400);
     }
     expect((await create.POST(req("/api/admin/servers", { jar: adminJar, raw: "{not json" }))).status).toBe(400);
@@ -150,8 +152,9 @@ describe("admin server management", () => {
     const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
     expect(row.secretHash).toBe(sha256(secret));
     expect(JSON.stringify(row)).not.toContain(secret);
-    expect(row).toMatchObject({ status: "ACTIVE", host: "play.example.org", port: 7777, createdById: adminId, clientPlatforms: ["win-x64", "linux-x64"] });
+    expect(row).toMatchObject({ status: "ACTIVE", host: "play.example.org", port: 7777, createdById: adminId, clientPlatforms: ["win-x64", "linux-x64"], adminMaxPlayers: 64, maxPlayers: 0 });
     const audit = await prisma.auditLog.findFirstOrThrow({ where: { action: "SERVER_CREATED", targetId: id } });
+    expect(audit.meta).toEqual({ name: serverInput.name, maxPlayers: 64, source: "web" });
     expect(JSON.stringify(audit)).not.toContain(secret);
     expect([...log.mock.calls, ...err.mock.calls].flat().join(" ")).not.toContain(secret);
     log.mockRestore();
@@ -164,6 +167,40 @@ describe("admin server management", () => {
     expect(html).toContain(serverInput.name);
     expect(html).not.toContain(secret);
     expect(html).not.toContain(row.secretHash);
+    expect(html).toContain("capacity 64 players");
+  });
+
+  it("creates with a chosen capacity, edits it with an audit, and shows a credential-less server as needing a secret", async () => {
+    const { id, secret } = await createServer({ maxPlayers: 12 });
+    expect((await prisma.officialServer.findUniqueOrThrow({ where: { id } })).adminMaxPlayers).toBe(12);
+    const set = (body: unknown, sid = id) => capacityRoute.POST(req(`/api/admin/servers/${sid}/capacity`, { jar: adminJar, json: body }), params(sid));
+    for (const bad of [{ maxPlayers: 0 }, { maxPlayers: 65 }, { maxPlayers: "8" }, {}, { maxPlayers: 8, extra: 1 }]) expect((await set(bad)).status).toBe(400);
+    expect((await set({ maxPlayers: 8 }, "nosuch")).status).toBe(404);
+    const res = await set({ maxPlayers: 40 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, maxPlayers: 40 });
+    const audits = await prisma.auditLog.findMany({ where: { action: "SERVER_CAPACITY_CHANGED", targetId: id } });
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ actorId: adminId, meta: { oldMaxPlayers: 12, newMaxPlayers: 40, source: "web" } });
+    const beatRes = await hb(id, secret, beat(nonce()));
+    expect(await beatRes.json()).toMatchObject({ ok: true, maxPlayers: 40 });
+
+    // A server created in game has no credential: the page says so and offers "Generate secret"; rotate provisions it once.
+    const pending = await prisma.officialServer.create({
+      data: { ...serverInput, name: `${serverInput.name} pending`, secretHash: null, secretRotatedAt: null, adminMaxPlayers: 20 },
+    });
+    serverIds.push(pending.id);
+    req("/admin/servers", { jar: adminJar });
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const html = renderToStaticMarkup(await AdminServersPage());
+    expect(html).toContain("no secret yet");
+    expect(html).toContain("Generate secret");
+    expect(html).toContain("capacity 20 players");
+    const rot = await rotate.POST(req(`/api/admin/servers/${pending.id}/rotate`, { jar: adminJar, json: {} }), params(pending.id));
+    expect(rot.status).toBe(200);
+    const fresh = (await rot.json()).secret as string;
+    expect((await prisma.officialServer.findUniqueOrThrow({ where: { id: pending.id } })).secretHash).toBe(sha256(fresh));
+    expect(await (await hb(pending.id, fresh, beat(nonce()))).json()).toMatchObject({ ok: true, maxPlayers: 20 });
   });
 
   it("updates compatibility values and audits it", async () => {
@@ -235,7 +272,7 @@ describe("heartbeat", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await res.json();
-    expect(body.ok).toBe(true);
+    expect(body).toEqual({ ok: true, checkedAt: body.checkedAt, maxPlayers: 64 });
     expect(new Date(body.checkedAt).toISOString()).toBe(body.checkedAt);
     const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
     expect(row).toMatchObject({ instanceNonce: n, players: 1, maxPlayers: 16, reportedGameBuild: "0.59.1-linux", serverRuntime: "linux-x64" });
@@ -255,7 +292,7 @@ describe("heartbeat", () => {
     await expectError(await heartbeat.POST(req("/api/servers/heartbeat", { auth: `Bearer ${secret}`, json: beat(nonce()) })), 401, "invalid_server");
     // A plaintext-hash value as the "secret" must not match either.
     const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
-    await expectError(await hb(id, row.secretHash, beat(nonce())), 401, "invalid_server");
+    await expectError(await hb(id, row.secretHash!, beat(nonce())), 401, "invalid_server");
 
     expect((await disable.POST(req(`/api/admin/servers/${id}/disable`, { jar: adminJar, json: {} }), params(id))).status).toBe(200);
     expect(await prisma.auditLog.count({ where: { action: "SERVER_DISABLED", targetId: id } })).toBe(1);

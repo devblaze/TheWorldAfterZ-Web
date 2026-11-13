@@ -9,6 +9,7 @@ export const SERVER_AUDIT = {
   compatUpdated: "SERVER_COMPAT_UPDATED",
   compatAdopted: "SERVER_COMPAT_ADOPTED",
   endpointChanged: "SERVER_ENDPOINT_CHANGED",
+  capacityChanged: "SERVER_CAPACITY_CHANGED",
   // Admission audit names; issued by join-ticket, admit and sessions/*.
   ticketIssued: "TICKET_ISSUED",
   admitOk: "ADMIT_OK",
@@ -57,6 +58,8 @@ export const SERVER_LIMITS = {
   end: { prefix: "server-end", limit: 600, windowMs: 60_000 },
 } as const;
 export const CHECK_MAX_IDS = 256;
+/** Admin-set capacity bounds (OfficialServer.adminMaxPlayers). Authoritative over the heartbeat-reported maxPlayers. */
+export const CAPACITY = { min: 1, max: 64, default: 64 } as const;
 export const MAX_PLAYERS = 10_000;
 /** Online = last heartbeat within this window. */
 export const ONLINE_MS = 90_000;
@@ -105,12 +108,32 @@ const port = z.number().int().min(1).max(65535);
 
 export const Endpoint = z.object({ host, port });
 
+const capacity = z.number().int().min(CAPACITY.min).max(CAPACITY.max);
+export const Capacity = z.strictObject({ maxPlayers: capacity });
+
 export const CreateServer = Compat.extend({
   name: label(64),
   region: label(32),
   host,
   port,
+  maxPlayers: capacity.default(CAPACITY.default),
 });
+
+/**
+ * In-game create (launcher bearer, admin role). No build fields: the first heartbeat of a new process adopts
+ * family and protocol, and an admin can edit compat on the web. Strict, so a client cannot smuggle other columns.
+ */
+export const LauncherCreateServer = z.strictObject({ name: label(64), region: label(32), host, port, maxPlayers: capacity });
+/** Placeholder compat for an in-game-created server until its first heartbeat adopts the real family/protocol. */
+export const PENDING_COMPAT = { gameBuild: "pending", buildFamily: "pending", protocolVersion: 1, clientPlatforms: [...CLIENT_PLATFORMS] };
+
+/** Seats the join-ticket check allows: the admin cap, tightened by what the running process last reported. */
+export const effectiveCapacity = (s: { adminMaxPlayers: number; maxPlayers: number }) =>
+  s.maxPlayers > 0 ? Math.min(s.adminMaxPlayers, s.maxPlayers) : s.adminMaxPlayers;
+
+/** "pending" until the operator has provisioned a secret and the process has heartbeated once. */
+export const serverStatus = (s: { status: string; secretHash: string | null; lastHeartbeatAt: Date | null }) =>
+  s.status !== "ACTIVE" ? "disabled" : !s.secretHash || !s.lastHeartbeatAt ? "pending" : "active";
 
 const nonce = z.string().min(16).max(128).regex(/^[\x21-\x7e]+$/);
 const informational = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/);

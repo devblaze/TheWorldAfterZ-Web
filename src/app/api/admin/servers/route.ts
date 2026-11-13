@@ -10,13 +10,14 @@ export async function POST(req: Request) {
     const parsed = CreateServer.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return json({ error: "invalid input" }, 400);
 
+    const { maxPlayers, ...rest } = parsed.data;
     const secret = newServerSecret();
     const server = await prisma.$transaction(async (tx) => {
       const s = await tx.officialServer.create({
-        data: { ...parsed.data, secretHash: sha256(secret), secretRotatedAt: new Date(), createdById: admin.id },
+        data: { ...rest, adminMaxPlayers: maxPlayers, secretHash: sha256(secret), secretRotatedAt: new Date(), createdById: admin.id },
         select: { id: true, name: true },
       });
-      await tx.auditLog.create({ data: { actorId: admin.id, action: SERVER_AUDIT.created, targetId: s.id, meta: { name: s.name } } });
+      await tx.auditLog.create({ data: { actorId: admin.id, action: SERVER_AUDIT.created, targetId: s.id, meta: { name: s.name, maxPlayers, source: "web" } } });
       return s;
     });
     // The only time this secret leaves the server.

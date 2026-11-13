@@ -204,14 +204,15 @@ model OfficialServer {
   protocolVersion   Int
   clientPlatforms   String[] // client OS builds allowed to join, e.g. win-x64, linux-x64
   status            ServerStatus @default(ACTIVE)
-  secretHash        String
-  secretRotatedAt   DateTime
+  secretHash        String? // null = no credential yet (created in game); provisioned only via the admin web rotate
+  secretRotatedAt   DateTime?
   lastHeartbeatAt   DateTime?
   instanceNonce     String? // from the latest heartbeat; a new value means the process restarted
   reportedGameBuild String? // last heartbeat game_build, logged only
   serverRuntime     String? // last heartbeat server_runtime, never used to filter clients
   players           Int          @default(0)
-  maxPlayers        Int          @default(0)
+  maxPlayers        Int          @default(0) // last heartbeat-reported value, recorded only
+  adminMaxPlayers   Int          @default(64) // admin-set capacity (1-64), authoritative; returned in the heartbeat 200
   createdById       String?
   createdBy         User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt         DateTime     @default(now())
