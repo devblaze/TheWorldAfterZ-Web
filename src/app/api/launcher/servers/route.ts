@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/db";
 import { launcherJson, methodNotAllowed } from "@/lib/launcher/http";
+import { launcherRole } from "@/lib/launcher/role";
 import { authenticateAccess, bearerToken } from "@/lib/launcher/store";
 import { limitLauncherDirectory } from "@/lib/rate-limit";
 import { activeRedemption } from "@/lib/session";
-import { DIRECTORY_MAX, ONLINE_MS, parseDirectoryQuery } from "@/lib/servers";
+import { DIRECTORY_MAX, effectiveCapacity, ONLINE_MS, parseDirectoryQuery } from "@/lib/servers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,13 +41,16 @@ export async function GET(req: Request) {
       },
       orderBy: [{ region: "asc" }, { name: "asc" }, { id: "asc" }],
       take: DIRECTORY_MAX,
-      select: { id: true, name: true, region: true, host: true, port: true, buildFamily: true, protocolVersion: true, players: true, maxPlayers: true },
+      select: { id: true, name: true, region: true, host: true, port: true, buildFamily: true, protocolVersion: true, players: true, maxPlayers: true, adminMaxPlayers: true },
     });
+    const role = launcherRole(auth);
+    const canManage = role === "admin";
     return launcherJson({
       servers: rows.map((s) => ({
         id: s.id, name: s.name, region: s.region, host: s.host, port: s.port, buildFamily: s.buildFamily,
-        protocolVersion: s.protocolVersion, players: s.players, maxPlayers: s.maxPlayers, online: true,
+        protocolVersion: s.protocolVersion, players: s.players, maxPlayers: effectiveCapacity(s), online: true, canManage,
       })),
+      role,
       checkedAt: checked.toISOString(),
     });
   } catch (err) {

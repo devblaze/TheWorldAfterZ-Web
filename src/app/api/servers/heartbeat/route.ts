@@ -11,7 +11,7 @@ const invalidServer = () => noStoreJson({ error: "invalid_server" }, 401);
 const notAllowed = methodNotAllowed("POST");
 export { notAllowed as GET, notAllowed as PUT, notAllowed as PATCH, notAllowed as DELETE, notAllowed as OPTIONS };
 
-type Locked = { status: string; secretHash: string; buildFamily: string; protocolVersion: number; instanceNonce: string | null };
+type Locked = { status: string; secretHash: string | null; adminMaxPlayers: number; buildFamily: string; protocolVersion: number; instanceNonce: string | null };
 
 export async function POST(req: Request) {
   try {
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     // Row lock: a rotation or disable that commits first is seen here, one that comes after waits for us.
     const result = await prisma.$transaction(async (tx) => {
       const [s] = await tx.$queryRaw<Locked[]>`
-        SELECT "status"::text AS "status", "secretHash", "buildFamily", "protocolVersion", "instanceNonce"
+        SELECT "status"::text AS "status", "secretHash", "adminMaxPlayers", "buildFamily", "protocolVersion", "instanceNonce"
         FROM "OfficialServer" WHERE "id" = ${cred.serverId} FOR UPDATE`;
       if (!s || s.status !== "ACTIVE" || !secretMatches(cred.secret, s.secretHash)) return "invalid_server" as const;
       const decision = decideHeartbeatBuild(s, b);
@@ -75,11 +75,12 @@ export async function POST(req: Request) {
           },
         });
       }
-      return now;
+      return { now, maxPlayers: s.adminMaxPlayers };
     });
     if (result === "invalid_server") return invalidServer();
     if (result === "build_mismatch") return noStoreJson({ error: "build_mismatch" }, 409);
-    return noStoreJson({ ok: true, checkedAt: result.toISOString() });
+    // maxPlayers is the admin-set capacity; the dedicated server enforces it live (its reported value is only recorded).
+    return noStoreJson({ ok: true, checkedAt: result.now.toISOString(), maxPlayers: result.maxPlayers });
   } catch (err) {
     console.error("server heartbeat failed", err instanceof Error ? err.name : "error");
     return noStoreJson({ error: "server_error" }, 500);

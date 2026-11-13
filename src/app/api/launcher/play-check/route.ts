@@ -1,5 +1,6 @@
 import { launcherJson } from "@/lib/launcher/http";
 import { PLAY_WINDOW_MS } from "@/lib/launcher/constants";
+import { launcherRole } from "@/lib/launcher/role";
 import { authenticateAccess, bearerToken } from "@/lib/launcher/store";
 import { ipFrom, limitLauncherPlay } from "@/lib/rate-limit";
 import { activeRedemption } from "@/lib/session";
@@ -52,6 +53,8 @@ export async function POST(req: Request) {
       entitled,
       reason,
       accountId: auth.userId,
+      // Display hint for the in-game admin UI only; every admin route re-checks the role server-side.
+      role: launcherRole(auth),
       nonce: body.nonce,
       game_build: body.game_build,
       platform: body.platform,

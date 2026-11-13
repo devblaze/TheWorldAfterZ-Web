@@ -8,8 +8,12 @@ const LAUNCHER_CSRF_EXEMPT = new Set([
   "/api/launcher/play-check",
   "/api/launcher/servers",
   "/api/launcher/join-ticket",
+  "/api/launcher/admin/servers",
 ]);
-const csrfExempt = (pathname: string) => LAUNCHER_CSRF_EXEMPT.has(pathname) || pathname.startsWith("/api/servers/");
+// In-game admin routes: bearer token plus a server-side role check; they never read cookies.
+const LAUNCHER_ADMIN_SERVER = /^\/api\/launcher\/admin\/servers\/[a-z0-9]{1,64}$/;
+const csrfExempt = (pathname: string) =>
+  LAUNCHER_CSRF_EXEMPT.has(pathname) || LAUNCHER_ADMIN_SERVER.test(pathname) || pathname.startsWith("/api/servers/");
 const noStorePath = (pathname: string) =>
   pathname === "/launcher/authorize" || pathname.startsWith("/api/launcher/") || pathname.startsWith("/api/servers/");
 

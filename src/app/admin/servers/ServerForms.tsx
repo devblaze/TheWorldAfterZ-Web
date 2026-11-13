@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { button, buttonDanger, input } from "@/components/ui";
 
 const PLATFORMS = ["win-x64", "linux-x64"];
+const CAPACITY_MAX = 64;
 
 async function post(url: string, body?: unknown) {
   return fetch(url, {
@@ -63,6 +64,7 @@ export function CreateServerForm() {
       region: form.get("region"),
       host: form.get("host"),
       port: Number(form.get("port")),
+      maxPlayers: Number(form.get("maxPlayers")),
       ...compatFrom(form),
     });
     setBusy(false);
@@ -78,6 +80,7 @@ export function CreateServerForm() {
       <label className="text-sm">Region<input className={input} name="region" required maxLength={32} pattern="[\w .\-]+" placeholder="eu" /></label>
       <label className="text-sm">Host<input className={input} name="host" required maxLength={253} placeholder="play.example.org" /></label>
       <label className="text-sm">Port<input className={input} name="port" type="number" min={1} max={65535} required defaultValue={7777} /></label>
+      <label className="text-sm">Max players<input className={input} name="maxPlayers" type="number" min={1} max={CAPACITY_MAX} required defaultValue={CAPACITY_MAX} /></label>
       <CompatFields />
       <div><button className={button} disabled={busy}>Create</button></div>
       {error && <p role="alert" className="text-sm text-red-400 sm:col-span-2">{error}</p>}
@@ -85,7 +88,12 @@ export function CreateServerForm() {
   );
 }
 
-export function ServerActions({ server }: { server: { id: string; active: boolean; host: string; port: number; gameBuild: string; buildFamily: string; protocolVersion: number; clientPlatforms: string[] } }) {
+type ServerRow = {
+  id: string; active: boolean; host: string; port: number; gameBuild: string; buildFamily: string; protocolVersion: number;
+  clientPlatforms: string[]; maxPlayers: number; hasSecret: boolean;
+};
+
+export function ServerActions({ server }: { server: ServerRow }) {
   const router = useRouter();
   const [rotated, setRotated] = useState<string | null>(null);
   const [msg, setMsg] = useState("");
@@ -113,6 +121,15 @@ export function ServerActions({ server }: { server: { id: string; active: boolea
     if (res?.ok) router.refresh();
   }
 
+  async function updateCapacity(form: FormData) {
+    const maxPlayers = Number(form.get("maxPlayers"));
+    if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > CAPACITY_MAX) return setMsg(`Max players must be 1-${CAPACITY_MAX}.`);
+    if (!confirm(`Set max players from ${server.maxPlayers} to ${maxPlayers}? The server applies it on its next heartbeat; players already in stay connected.`)) return;
+    const res = await post(`/api/admin/servers/${server.id}/capacity`, { maxPlayers });
+    setMsg(res?.ok ? "Max players updated." : "Update failed. Check the inputs.");
+    if (res?.ok) router.refresh();
+  }
+
   if (rotated) return <SecretOnce id={server.id} secret={rotated} onDone={() => setRotated(null)} />;
   if (!server.active) return <span className="text-stone-500">disabled</span>;
   return (
@@ -123,8 +140,14 @@ export function ServerActions({ server }: { server: { id: string; active: boolea
         <label className="text-sm">Port<input className={input} name="port" type="number" min={1} max={65535} required defaultValue={server.port} /></label>
         <button className={button}>Save address</button>
       </form>
+      <form action={updateCapacity} className="flex flex-wrap items-end gap-2">
+        <label className="text-sm">Max players<input className={input} name="maxPlayers" type="number" min={1} max={CAPACITY_MAX} required defaultValue={server.maxPlayers} /></label>
+        <button className={button}>Save capacity</button>
+      </form>
       <div className="flex gap-2">
-        <button className={buttonDanger} onClick={() => act("rotate", "Rotate the secret? The old one stops working immediately.")}>Rotate secret</button>
+        <button className={buttonDanger} onClick={() => act("rotate", server.hasSecret
+          ? "Rotate the secret? The old one stops working immediately."
+          : "Generate this server's secret? It is shown once; put it in the dedicated server's env.")}>{server.hasSecret ? "Rotate secret" : "Generate secret"}</button>
         <button className={buttonDanger} onClick={() => act("disable", "Disable this server? All its calls will be refused.")}>Disable</button>
       </div>
       {msg && <p role="status" className="text-sm text-stone-400">{msg}</p>}

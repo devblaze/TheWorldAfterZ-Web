@@ -37,7 +37,7 @@ export async function serverPost<S extends z.ZodType>(
     if (!parsed?.success) return launcherJson({ error: "invalid_request" }, 400);
 
     const out = await prisma.$transaction(async (tx) => {
-      const [s] = await tx.$queryRaw<(LockedServer & { status: string; secretHash: string })[]>`
+      const [s] = await tx.$queryRaw<(LockedServer & { status: string; secretHash: string | null })[]>`
         SELECT "id", "status"::text AS "status", "secretHash", "buildFamily", "protocolVersion", "instanceNonce"
         FROM "OfficialServer" WHERE "id" = ${cred.serverId} FOR SHARE`;
       if (!s || s.status !== "ACTIVE" || !secretMatches(cred.secret, s.secretHash)) return null;

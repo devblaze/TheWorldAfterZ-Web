@@ -15,7 +15,7 @@ export default async function AdminServers() {
   const servers = await prisma.officialServer.findMany({
     select: {
       id: true, name: true, region: true, host: true, port: true, status: true, gameBuild: true, buildFamily: true,
-      protocolVersion: true, clientPlatforms: true, lastHeartbeatAt: true, players: true, maxPlayers: true,
+      protocolVersion: true, clientPlatforms: true, lastHeartbeatAt: true, players: true, maxPlayers: true, adminMaxPlayers: true,
       reportedGameBuild: true, serverRuntime: true, secretRotatedAt: true,
     },
     orderBy: { createdAt: "desc" },
@@ -47,7 +47,12 @@ export default async function AdminServers() {
                       <div className="font-semibold">{s.name}</div>
                       <div className="font-mono text-xs text-stone-400">{s.id}</div>
                       <div className="text-stone-400">{s.region} · {s.host}:{s.port}</div>
-                      <div className="text-xs text-stone-500">secret rotated {displayTime(s.secretRotatedAt)}</div>
+                      <div className="text-sm text-stone-300">capacity {s.adminMaxPlayers} players (admin-set)</div>
+                      {s.secretRotatedAt ? (
+                        <div className="text-xs text-stone-500">secret rotated {displayTime(s.secretRotatedAt)}</div>
+                      ) : (
+                        <div className="text-xs text-amber-400">no secret yet: generate one below to let it heartbeat</div>
+                      )}
                     </td>
                     <td className={s.status === "DISABLED" ? "text-red-400" : online ? "text-green-400" : "text-stone-400"}>
                       {s.status === "DISABLED" ? "DISABLED" : online ? "online" : "offline"}
@@ -56,11 +61,14 @@ export default async function AdminServers() {
                       {s.lastHeartbeatAt ? (
                         <>
                           {displayTime(s.lastHeartbeatAt)}
-                          <div className="text-xs">{s.players}/{s.maxPlayers} · {s.reportedGameBuild} · {s.serverRuntime}</div>
+                          <div className="text-xs">{s.players}/{s.adminMaxPlayers} · {s.reportedGameBuild} · {s.serverRuntime}</div>
+                          {s.maxPlayers !== s.adminMaxPlayers && (
+                            <div className="text-xs text-amber-400">server last reported a cap of {s.maxPlayers}</div>
+                          )}
                         </>
                       ) : "never"}
                     </td>
-                    <td><ServerActions server={{ id: s.id, active: s.status === "ACTIVE", host: s.host, port: s.port, gameBuild: s.gameBuild, buildFamily: s.buildFamily, protocolVersion: s.protocolVersion, clientPlatforms: s.clientPlatforms }} /></td>
+                    <td><ServerActions server={{ id: s.id, active: s.status === "ACTIVE", host: s.host, port: s.port, gameBuild: s.gameBuild, buildFamily: s.buildFamily, protocolVersion: s.protocolVersion, clientPlatforms: s.clientPlatforms, maxPlayers: s.adminMaxPlayers, hasSecret: !!s.secretRotatedAt }} /></td>
                   </tr>
                 );
               })}

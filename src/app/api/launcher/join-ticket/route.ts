@@ -4,7 +4,7 @@ import { sha256 } from "@/lib/crypto";
 import { launcherJson, methodNotAllowed, readJsonBody } from "@/lib/launcher/http";
 import { authenticateAccess, bearerToken } from "@/lib/launcher/store";
 import { limitLauncherJoin } from "@/lib/rate-limit";
-import { JOIN_TICKET_TTL_MS, JoinTicketRequest, ONLINE_MS, SERVER_AUDIT } from "@/lib/servers";
+import { effectiveCapacity, JOIN_TICKET_TTL_MS, JoinTicketRequest, ONLINE_MS, SERVER_AUDIT } from "@/lib/servers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
       if (s.buildFamily !== b.build_family || s.protocolVersion !== b.protocol_version || !s.clientPlatforms.includes(b.client_platform)) {
         return deny("build_mismatch");
       }
-      if (s.players >= s.maxPlayers) return deny("server_full");
+      if (s.players >= effectiveCapacity(s)) return deny("server_full");
 
       const ticket = randomBytes(32).toString("base64url");
       const expires = new Date(checked.getTime() + JOIN_TICKET_TTL_MS);
