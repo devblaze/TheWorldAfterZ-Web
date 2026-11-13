@@ -9,12 +9,24 @@ Public update feeds and the gated first-install download are unchanged.
 ## Administration
 
 `/admin/servers` uses the same live admin guard as `/admin/keys`. It creates official
-servers, rotates credentials, disables servers, and updates build compatibility.
-Name, region, host, port, game build, build family, protocol version, and allowed client
-platforms are required on create. Client platforms are win-x64 and/or linux-x64.
-Registered build_family and protocol_version then follow the server's heartbeat on each
-new process start (a new instance_nonce). The admin compatibility edit still exists for
-manual updates and continues to write SERVER_COMPAT_UPDATED.
+servers, rotates credentials, disables servers, updates build compatibility, and
+edits host and port. Name, region, host, port, game build, build family, protocol
+version, and allowed client platforms are required on create. Client platforms are
+win-x64 and/or linux-x64. Registered build_family and protocol_version then follow
+the server's heartbeat on each new process start (a new instance_nonce). The admin
+compatibility edit still exists for manual updates and continues to write
+SERVER_COMPAT_UPDATED.
+
+Host and port can be changed after create with POST `/api/admin/servers/[id]/endpoint`
+so a server keeps its id when it moves, for example from a LAN address to a public
+DNS name. The change uses the same host and port rules as create, writes a
+SERVER_ENDPOINT_CHANGED audit with the old and new host and port, and does not
+rotate the secret (the secret is never logged). Open sessions are left running:
+they are already connected, and a process move still ends them on the next
+heartbeat via server_restart. Unused, unexpired join tickets are expired in the
+same transaction. Tickets are bound to the server id, not the address, but the
+launcher already advertised the old host and port to those clients; tickets last
+60 seconds and a client can request a new one after the directory updates.
 
 Create and rotate show a 32-byte base64url secret once. Store it only in the dedicated
 host environment as TWAZ_SERVER_SECRET, with TWAZ_SERVER_ID and TWAZ_SITE_ORIGIN.

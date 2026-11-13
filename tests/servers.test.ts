@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { sha256 } from "../src/lib/crypto";
-import { CreateServer, decideHeartbeatBuild, Heartbeat, newServerSecret, parseServerAuth, secretMatches } from "../src/lib/servers";
+import { CreateServer, Endpoint, decideHeartbeatBuild, Heartbeat, newServerSecret, parseServerAuth, secretMatches } from "../src/lib/servers";
 
 // Any DB access throws, to prove the heartbeat fails closed.
 vi.mock("@/lib/db", () => ({
@@ -64,6 +64,21 @@ describe("input validation", () => {
       { name: "<script>" }, { buildFamily: "a b" }, { protocolVersion: -1 }, { gameBuild: "" },
     ]) {
       expect(CreateServer.safeParse({ ...server, ...patch }).success, JSON.stringify(patch)).toBe(false);
+    }
+  });
+
+  it("validates endpoint updates with the same host and port rules as create", () => {
+    expect(Endpoint.safeParse({ host: "play.example.org", port: 7777 }).success).toBe(true);
+    expect(Endpoint.safeParse({ host: "192.168.4.34", port: 7777 }).success).toBe(true);
+    expect(Endpoint.safeParse({ host: "2001:db8::1", port: 1 }).success).toBe(true);
+    expect(Endpoint.safeParse({ host: "Play.Example.ORG", port: 65535 }).data).toEqual({ host: "play.example.org", port: 65535 });
+    expect(Endpoint.safeParse({ host: "play.example.org" }).success).toBe(false);
+    expect(Endpoint.safeParse({ port: 7777 }).success).toBe(false);
+    for (const patch of [
+      { port: 0 }, { port: 65536 }, { port: "7777" }, { host: "evil.example/path" }, { host: "http://x.org" }, { host: "" },
+      { host: "x.org:7777" },
+    ]) {
+      expect(Endpoint.safeParse({ host: "play.example.org", port: 7777, ...patch }).success, JSON.stringify(patch)).toBe(false);
     }
   });
 });

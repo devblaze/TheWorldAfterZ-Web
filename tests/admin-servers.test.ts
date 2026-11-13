@@ -11,6 +11,7 @@ import { POST as create } from "../src/app/api/admin/servers/route";
 import { POST as rotate } from "../src/app/api/admin/servers/[id]/rotate/route";
 import { POST as disable } from "../src/app/api/admin/servers/[id]/disable/route";
 import { POST as compat } from "../src/app/api/admin/servers/[id]/compat/route";
+import { POST as endpoint } from "../src/app/api/admin/servers/[id]/endpoint/route";
 
 const input = {
   name: "EU 1", region: "eu", host: "play.example.org", port: 7777,
@@ -20,7 +21,8 @@ const request = () => new Request("http://localhost:3000/api/admin/servers", {
   method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input),
 });
 const calls = () => [create(request()), rotate(request(), { params: Promise.resolve({ id: "abc123" }) }),
-  disable(request(), { params: Promise.resolve({ id: "abc123" }) }), compat(request(), { params: Promise.resolve({ id: "abc123" }) })];
+  disable(request(), { params: Promise.resolve({ id: "abc123" }) }), compat(request(), { params: Promise.resolve({ id: "abc123" }) }),
+  endpoint(request(), { params: Promise.resolve({ id: "abc123" }) })];
 
 beforeEach(() => { guard.mockReset(); });
 
