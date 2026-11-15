@@ -10,6 +10,7 @@ export const SERVER_AUDIT = {
   compatAdopted: "SERVER_COMPAT_ADOPTED",
   endpointChanged: "SERVER_ENDPOINT_CHANGED",
   capacityChanged: "SERVER_CAPACITY_CHANGED",
+  buildSynced: "SERVER_BUILD_SYNCED",
   // Admission audit names; issued by join-ticket, admit and sessions/*.
   ticketIssued: "TICKET_ISSUED",
   admitOk: "ADMIT_OK",
@@ -93,6 +94,23 @@ export function secretMatches(secret: string, storedHash: string | null | undefi
 const label = (max: number) => z.string().trim().min(1).max(max).regex(/^[\w .-]+$/);
 const buildId = z.string().trim().min(1).max(64).regex(/^[\w.+-]+$/);
 const protocolVersion = z.number().int().min(1).max(1_000_000);
+
+/**
+ * Informational OfficialServer.gameBuild after an accepted heartbeat.
+ * Prefers the stamp when it fits the admin field (1–64, [\w.+-]+); otherwise the family.
+ * Leaves the stored value alone when neither is a valid admin gameBuild.
+ */
+export function syncedHeartbeatGameBuild(
+  storedGameBuild: string,
+  reported: { game_build: string; build_family: string },
+): string {
+  const stamp = buildId.safeParse(reported.game_build);
+  if (stamp.success) return stamp.data;
+  const family = buildId.safeParse(reported.build_family);
+  if (family.success) return family.data;
+  return storedGameBuild;
+}
+
 const HOST_RE = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
 export const Compat = z.object({
