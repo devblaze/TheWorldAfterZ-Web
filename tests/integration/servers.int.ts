@@ -275,8 +275,11 @@ describe("heartbeat", () => {
     expect(body).toEqual({ ok: true, checkedAt: body.checkedAt, maxPlayers: 64 });
     expect(new Date(body.checkedAt).toISOString()).toBe(body.checkedAt);
     const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
-    expect(row).toMatchObject({ instanceNonce: n, players: 1, maxPlayers: 16, reportedGameBuild: "0.59.1-linux", serverRuntime: "linux-x64" });
+    expect(row).toMatchObject({ instanceNonce: n, players: 1, maxPlayers: 16, reportedGameBuild: "0.59.1-linux", gameBuild: "0.59.1-linux", serverRuntime: "linux-x64" });
     expect(row.lastHeartbeatAt?.toISOString()).toBe(body.checkedAt);
+    const synced = await prisma.auditLog.findFirstOrThrow({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } });
+    expect(synced.actorId).toBeNull();
+    expect(synced.meta).toEqual({ oldGameBuild: "0.59.1", newGameBuild: "0.59.1-linux", source: "heartbeat" });
   });
 
   it("treats game_build and server_runtime as informational only", async () => {
@@ -343,7 +346,7 @@ describe("heartbeat", () => {
       protocolVersion: 4,
       instanceNonce: second,
       reportedGameBuild: "0.60.0-linux",
-      gameBuild: "0.59.1",
+      gameBuild: "0.60.0-linux",
     });
     expect(row.lastHeartbeatAt?.toISOString()).toBe(body.checkedAt);
     expect(await prisma.serverSession.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ endReason: "server_restart" });
@@ -355,7 +358,11 @@ describe("heartbeat", () => {
       oldProtocolVersion: 3,
       newProtocolVersion: 4,
     });
+    const synced = await prisma.auditLog.findFirstOrThrow({ where: { action: "SERVER_BUILD_SYNCED", targetId: id, meta: { path: ["newGameBuild"], equals: "0.60.0-linux" } } });
+    expect(synced.actorId).toBeNull();
+    expect(synced.meta).toEqual({ oldGameBuild: "0.59.1-linux", newGameBuild: "0.60.0-linux", source: "heartbeat" });
     expect(JSON.stringify(audit)).not.toContain(secret);
+    expect(JSON.stringify(synced)).not.toContain(secret);
     expect([...err.mock.calls].flat().join(" ")).not.toContain(secret);
     err.mockRestore();
     await prisma.nativeSession.delete({ where: { id: ns.id } });
@@ -378,8 +385,10 @@ describe("heartbeat", () => {
       instanceNonce: n,
       lastHeartbeatAt: before.lastHeartbeatAt,
       reportedGameBuild: before.reportedGameBuild,
+      gameBuild: before.gameBuild,
     });
     expect(await prisma.auditLog.count({ where: { action: "SERVER_COMPAT_ADOPTED", targetId: id } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(1);
   });
 
   it("does not audit or change family when a new process reports the registered values", async () => {
@@ -393,8 +402,10 @@ describe("heartbeat", () => {
       buildFamily: "playtest-0.59",
       protocolVersion: 3,
       instanceNonce: second,
+      gameBuild: "0.59.1-linux",
     });
     expect(await prisma.auditLog.count({ where: { action: "SERVER_COMPAT_ADOPTED", targetId: id } })).toBe(0);
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(1);
   });
 
   it("401s bad credentials before reading the body, even when the body would mismatch", async () => {
@@ -431,6 +442,78 @@ describe("heartbeat", () => {
     // Wrong credentials neither consume nor see the bucket.
     await expectError(await hb(id, randomBytes(32).toString("base64url"), beat(n)), 401, "invalid_server");
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("syncs gameBuild from an accepted heartbeat and does not re-audit when it is already current", async () => {
+    const { id, secret } = await createServer();
+    const n = nonce();
+    expect((await hb(id, secret, beat(n))).status).toBe(200);
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({ gameBuild: "0.59.1-linux" });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(1);
+
+    await resetLimit(id);
+    expect((await hb(id, secret, beat(n))).status).toBe(200);
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(1);
+
+    await resetLimit(id);
+    expect((await hb(id, secret, beat(n, { game_build: "0.59.2-linux" }))).status).toBe(200);
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      gameBuild: "0.59.2-linux",
+      reportedGameBuild: "0.59.2-linux",
+      buildFamily: "playtest-0.59",
+    });
+    const synced = await prisma.auditLog.findMany({ where: { action: "SERVER_BUILD_SYNCED", targetId: id }, orderBy: { at: "asc" } });
+    expect(synced).toHaveLength(2);
+    expect(synced[1].meta).toEqual({ oldGameBuild: "0.59.1-linux", newGameBuild: "0.59.2-linux", source: "heartbeat" });
+  });
+
+  it("falls back to build_family when the stamp does not fit the admin gameBuild field", async () => {
+    const { id, secret } = await createServer();
+    const n = nonce();
+    expect((await hb(id, secret, beat(n, { game_build: "0.59:linux" }))).status).toBe(200);
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      gameBuild: "playtest-0.59",
+      reportedGameBuild: "0.59:linux",
+    });
+    const synced = await prisma.auditLog.findFirstOrThrow({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } });
+    expect(synced.meta).toEqual({ oldGameBuild: "0.59.1", newGameBuild: "playtest-0.59", source: "heartbeat" });
+  });
+
+  it("does not sync gameBuild on 401, 409 or a rate-limited heartbeat", async () => {
+    const { id, secret } = await createServer();
+    await expectError(await hb(id, "B".repeat(43), beat(nonce(), { game_build: "0.60.0-linux" })), 401, "invalid_server");
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      gameBuild: "0.59.1",
+      reportedGameBuild: null,
+      lastHeartbeatAt: null,
+    });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(0);
+
+    const n = nonce();
+    expect((await hb(id, secret, beat(n, { game_build: "0.59.1" }))).status).toBe(200);
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({ gameBuild: "0.59.1" });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(0);
+
+    await resetLimit(id);
+    await expectError(await hb(id, secret, beat(n, { build_family: "playtest-0.58", game_build: "0.58.0-linux" })), 409, "build_mismatch");
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      gameBuild: "0.59.1",
+      reportedGameBuild: "0.59.1",
+      buildFamily: "playtest-0.59",
+    });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(0);
+
+    await resetLimit(id);
+    for (let i = 0; i < 4; i++) {
+      await expectError(await hb(id, secret, beat("short")), 400, "invalid_request");
+    }
+    const limited = await hb(id, secret, beat(n, { game_build: "0.59.2-linux" }));
+    await expectError(limited, 429, "rate_limited");
+    expect(await prisma.officialServer.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      gameBuild: "0.59.1",
+      reportedGameBuild: "0.59.1",
+    });
+    expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(0);
   });
 
   it("ends open sessions of the previous instance on restart, keeping the new instance's", async () => {

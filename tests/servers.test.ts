@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { sha256 } from "../src/lib/crypto";
 import {
   Capacity, CreateServer, Endpoint, decideHeartbeatBuild, effectiveCapacity, Heartbeat, LauncherCreateServer, newServerSecret, parseServerAuth,
-  secretMatches, serverStatus,
+  secretMatches, serverStatus, syncedHeartbeatGameBuild,
 } from "../src/lib/servers";
 
 // Any DB access throws, to prove the heartbeat fails closed.
@@ -112,6 +112,22 @@ describe("heartbeat build adoption", () => {
   it("leaves family and protocol alone when a new or same process reports the registered values", () => {
     expect(decideHeartbeatBuild(stored, reported)).toEqual({ kind: "ok" });
     expect(decideHeartbeatBuild(stored, { ...reported, instance_nonce: "new-nonce-16chars" })).toEqual({ kind: "ok" });
+  });
+});
+
+describe("heartbeat gameBuild sync", () => {
+  it("prefers a stamp that fits the admin gameBuild field", () => {
+    expect(syncedHeartbeatGameBuild("0.59.1", { game_build: "0.60.0-linux", build_family: "playtest-0.60" })).toBe("0.60.0-linux");
+    expect(syncedHeartbeatGameBuild("playtest-0.61", { game_build: "playtest-0.62-502a7f2", build_family: "playtest-0.62" })).toBe("playtest-0.62-502a7f2");
+  });
+
+  it("falls back to the family when the stamp is too long or has disallowed characters", () => {
+    expect(syncedHeartbeatGameBuild("0.59.1", { game_build: "a".repeat(65), build_family: "playtest-0.60" })).toBe("playtest-0.60");
+    expect(syncedHeartbeatGameBuild("0.59.1", { game_build: "0.60:sha-abc", build_family: "playtest-0.60" })).toBe("playtest-0.60");
+  });
+
+  it("leaves the stored value when neither stamp nor family is a valid admin gameBuild", () => {
+    expect(syncedHeartbeatGameBuild("0.59.1", { game_build: "0.60:sha", build_family: "playtest 0.60" })).toBe("0.59.1");
   });
 });
 

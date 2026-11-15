@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { methodNotAllowed, launcherJson as noStoreJson, readJsonBody } from "@/lib/launcher/http";
 import { rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches, SERVER_AUDIT } from "@/lib/servers";
+import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches, SERVER_AUDIT, syncedHeartbeatGameBuild } from "@/lib/servers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ const invalidServer = () => noStoreJson({ error: "invalid_server" }, 401);
 const notAllowed = methodNotAllowed("POST");
 export { notAllowed as GET, notAllowed as PUT, notAllowed as PATCH, notAllowed as DELETE, notAllowed as OPTIONS };
 
-type Locked = { status: string; secretHash: string | null; adminMaxPlayers: number; buildFamily: string; protocolVersion: number; instanceNonce: string | null };
+type Locked = { status: string; secretHash: string | null; adminMaxPlayers: number; buildFamily: string; protocolVersion: number; instanceNonce: string | null; gameBuild: string };
 
 export async function POST(req: Request) {
   try {
@@ -33,12 +33,14 @@ export async function POST(req: Request) {
     // Row lock: a rotation or disable that commits first is seen here, one that comes after waits for us.
     const result = await prisma.$transaction(async (tx) => {
       const [s] = await tx.$queryRaw<Locked[]>`
-        SELECT "status"::text AS "status", "secretHash", "adminMaxPlayers", "buildFamily", "protocolVersion", "instanceNonce"
+        SELECT "status"::text AS "status", "secretHash", "adminMaxPlayers", "buildFamily", "protocolVersion", "instanceNonce", "gameBuild"
         FROM "OfficialServer" WHERE "id" = ${cred.serverId} FOR UPDATE`;
       if (!s || s.status !== "ACTIVE" || !secretMatches(cred.secret, s.secretHash)) return "invalid_server" as const;
       const decision = decideHeartbeatBuild(s, b);
       if (decision.kind === "mismatch") return "build_mismatch" as const;
       const now = new Date();
+      const nextGameBuild = syncedHeartbeatGameBuild(s.gameBuild, b);
+      const gameBuildChanged = nextGameBuild !== s.gameBuild;
       if (s.instanceNonce !== b.instance_nonce) {
         // New process: every open session not belonging to it is gone.
         await tx.serverSession.updateMany({
@@ -58,6 +60,7 @@ export async function POST(req: Request) {
           ...(decision.kind === "adopt"
             ? { buildFamily: b.build_family, protocolVersion: b.protocol_version }
             : {}),
+          ...(gameBuildChanged ? { gameBuild: nextGameBuild } : {}),
         },
       });
       if (decision.kind === "adopt") {
@@ -72,6 +75,16 @@ export async function POST(req: Request) {
               oldProtocolVersion: decision.oldProtocolVersion,
               newProtocolVersion: decision.newProtocolVersion,
             },
+          },
+        });
+      }
+      if (gameBuildChanged) {
+        await tx.auditLog.create({
+          data: {
+            actorId: null,
+            action: SERVER_AUDIT.buildSynced,
+            targetId: cred.serverId,
+            meta: { oldGameBuild: s.gameBuild, newGameBuild: nextGameBuild, source: "heartbeat" },
           },
         });
       }

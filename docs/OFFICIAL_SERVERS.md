@@ -13,9 +13,14 @@ servers, rotates credentials, disables servers, updates build compatibility, and
 edits host and port. Name, region, host, port, game build, build family, protocol
 version, and allowed client platforms are required on create. Client platforms are
 win-x64 and/or linux-x64. Registered build_family and protocol_version then follow
-the server's heartbeat on each new process start (a new instance_nonce). The admin
-compatibility edit still exists for manual updates and continues to write
-SERVER_COMPAT_UPDATED.
+the server's heartbeat on each new process start (a new instance_nonce). The
+informational gameBuild field is also kept in sync from every accepted heartbeat
+(the stamp when it fits the admin 1–64 [\w.+-]+ field, otherwise the family) and
+writes SERVER_BUILD_SYNCED only when the stored value changes. It is display-only:
+admission, the directory, and join-ticket still use only buildFamily and
+protocolVersion. The admin compatibility edit still exists for manual updates and
+continues to write SERVER_COMPAT_UPDATED; a later accepted heartbeat may overwrite
+gameBuild again.
 
 Host and port can be changed after create with POST `/api/admin/servers/[id]/endpoint`
 so a server keeps its id when it moves, for example from a LAN address to a public
@@ -109,10 +114,14 @@ OfficialServer row, records reportedGameBuild as before, and ends open sessions 
 other instances with reason server_restart. Admit and join-ticket compatibility then
 use those updated row values. A change of family or protocol writes a
 SERVER_COMPAT_ADOPTED audit with the old and new values; the secret and Authorization
-header are never logged. When the nonce is unchanged and family or protocol differ,
-the site returns 409 and leaves the row unchanged. A rotation or disable committed
-before that transaction acquires its row lock wins. The admin compatibility edit
-still exists for manual updates (SERVER_COMPAT_UPDATED).
+header are never logged. Every accepted heartbeat also syncs the informational
+gameBuild field as described under Administration, writing SERVER_BUILD_SYNCED with
+the old and new values and source heartbeat only when the value actually changes.
+401, 409, and rate-limited heartbeats leave gameBuild alone. When the nonce is
+unchanged and family or protocol differ, the site returns 409 and leaves the row
+unchanged. A rotation or disable committed before that transaction acquires its row
+lock wins. The admin compatibility edit still exists for manual updates
+(SERVER_COMPAT_UPDATED).
 
 The migration also prepares JoinTicket and ServerSession for later steps, including
 instance-scoped connection identities. Audit action names live in src/lib/servers.ts.

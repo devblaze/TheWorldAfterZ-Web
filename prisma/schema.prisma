@@ -199,7 +199,7 @@ model OfficialServer {
   region            String
   host              String
   port              Int
-  gameBuild         String // admin-registered, informational
+  gameBuild         String // informational; kept in sync from accepted heartbeats
   buildFamily       String
   protocolVersion   Int
   clientPlatforms   String[] // client OS builds allowed to join, e.g. win-x64, linux-x64
