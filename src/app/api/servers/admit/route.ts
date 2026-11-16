@@ -1,4 +1,5 @@
-import { sha256 } from "@/lib/crypto";
+import { displayName, sha256 } from "@/lib/crypto";
+import { bannedAmong, lockBans } from "@/lib/moderation";
 import { methodNotAllowed } from "@/lib/launcher/http";
 import { serverPost } from "@/lib/server-api";
 import { accessReasons } from "@/lib/server-access";
@@ -53,6 +54,11 @@ export const POST = (req: Request) =>
     const [reason] = await accessReasons(tx, [{ userId: t.userId, nativeSessionId: t.nativeSessionId }]);
     if (reason) return deny(reason === "unverified" ? "unverified" : reason === "key_revoked" ? "no_key" : "session_revoked", t, { access: reason });
 
+    // Added after the entitlement checks. The ticket is already consumed, like every other denial here.
+    await lockBans(tx);
+    const banned = (await bannedAmong(tx, [t.userId], server.id)).get(t.userId);
+    if (banned !== undefined) return deny("banned", t, { banExpiresAt: banned?.toISOString() ?? null });
+
     const clash = await tx.serverSession.findUnique({
       where: { serverId_instanceNonce_connectionId: { serverId: server.id, instanceNonce: b.instance_nonce, connectionId: b.connection_id } },
       select: { id: true },
@@ -69,5 +75,5 @@ export const POST = (req: Request) =>
       },
     });
     // displayName is derived from the account id: a stable, non-PII pseudonym (not a player-selected username). There is no username in the schema.
-    return { admitted: true, accountId: t.userId, displayName: `Player-${sha256(`display:${t.userId}`).slice(0, 8)}`, serverSessionId: session.id };
+    return { admitted: true, accountId: t.userId, displayName: displayName(t.userId), serverSessionId: session.id };
   });

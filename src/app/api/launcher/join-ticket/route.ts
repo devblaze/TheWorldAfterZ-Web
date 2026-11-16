@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { sha256 } from "@/lib/crypto";
 import { launcherJson, methodNotAllowed, readJsonBody } from "@/lib/launcher/http";
 import { authenticateAccess, bearerToken } from "@/lib/launcher/store";
+import { bannedAmong, lockBans } from "@/lib/moderation";
 import { limitLauncherJoin } from "@/lib/rate-limit";
 import { effectiveCapacity, JOIN_TICKET_TTL_MS, JoinTicketRequest, ONLINE_MS, SERVER_AUDIT } from "@/lib/servers";
 
@@ -54,6 +55,11 @@ export async function POST(req: Request) {
         return deny("build_mismatch");
       }
       if (s.players >= effectiveCapacity(s)) return deny("server_full");
+
+      // After every entitlement check. The "bans" counter lock orders this against a concurrent ban.
+      await lockBans(tx);
+      const banExpiry = (await bannedAmong(tx, [auth.userId], s.id)).get(auth.userId);
+      if (banExpiry !== undefined) return { entitled: false as const, reason: "banned", banExpiresAt: banExpiry?.toISOString() ?? null };
 
       const ticket = randomBytes(32).toString("base64url");
       const expires = new Date(checked.getTime() + JOIN_TICKET_TTL_MS);

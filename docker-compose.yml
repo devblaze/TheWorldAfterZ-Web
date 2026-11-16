@@ -31,6 +31,7 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET (openssl rand -base64 32)}
       DOWNLOAD_SIGNING_SECRET: ${DOWNLOAD_SIGNING_SECRET:?set DOWNLOAD_SIGNING_SECRET (openssl rand -base64 32)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-nikosantoniadis94@gmail.com}
+      OWNER_EMAILS: ${OWNER_EMAILS:-nikosantoniadis94@gmail.com}
     depends_on:
       db:
         condition: service_healthy

@@ -1,3 +1,4 @@
+import { bannedAmong, lockBans } from "@/lib/moderation";
 import { methodNotAllowed } from "@/lib/launcher/http";
 import { serverPost } from "@/lib/server-api";
 import { accessReasons } from "@/lib/server-access";
@@ -20,7 +21,10 @@ export const POST = (req: Request) =>
       SELECT s."id", s."userId", t."nativeSessionId" FROM "ServerSession" s JOIN "JoinTicket" t ON t."id" = s."ticketId"
       WHERE s."id" = ANY(${ids}::text[]) AND s."serverId" = ${server.id} AND s."endedAt" IS NULL ORDER BY s."id" FOR UPDATE OF s`;
     const reasons = await accessReasons(tx, live);
-    const reasonOf = new Map(live.map((s, i) => [s.id, reasons[i]]));
+    // Added after the entitlement reasons: an otherwise valid session of a banned account is revoked as "banned".
+    await lockBans(tx);
+    const banned = await bannedAmong(tx, [...new Set(live.map((s) => s.userId))], server.id);
+    const reasonOf = new Map(live.map((s, i) => [s.id, reasons[i] ?? (banned.has(s.userId) ? "banned" : null)]));
 
     const lost = live.filter((s) => reasonOf.get(s.id));
     if (lost.length > 0) {

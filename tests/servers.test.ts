@@ -58,6 +58,16 @@ describe("input validation", () => {
     }
   });
 
+  it("playerAccountIds is optional, unique, at most 64 and account-id shaped", () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `acc${i}`);
+    expect(Heartbeat.safeParse({ ...beat, playerAccountIds: [] }).success).toBe(true);
+    expect(Heartbeat.safeParse({ ...beat, playerAccountIds: ids(64) }).success).toBe(true);
+    expect(Heartbeat.safeParse({ ...beat, playerAccountIds: ["a".repeat(64)] }).data?.playerAccountIds).toEqual(["a".repeat(64)]);
+    for (const playerAccountIds of [ids(65), ["a", "a"], ["A"], [""], ["a".repeat(65)], ["a-b"], [1], "a", null]) {
+      expect(Heartbeat.safeParse({ ...beat, playerAccountIds }).success, JSON.stringify(playerAccountIds)).toBe(false);
+    }
+  });
+
   it("validates server registration", () => {
     expect(CreateServer.safeParse(server).success).toBe(true);
     expect(CreateServer.safeParse({ ...server, host: "2001:db8::1" }).success).toBe(true);
