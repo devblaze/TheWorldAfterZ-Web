@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { counters } from "@/lib/moderation";
 import { methodNotAllowed, launcherJson as noStoreJson, readJsonBody } from "@/lib/launcher/http";
 import { rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
 import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches, SERVER_AUDIT, syncedHeartbeatGameBuild } from "@/lib/servers";
@@ -6,7 +7,7 @@ import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseSe
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const BODY_MAX = 4096;
+const BODY_MAX = 16384;
 const invalidServer = () => noStoreJson({ error: "invalid_server" }, 401);
 const notAllowed = methodNotAllowed("POST");
 export { notAllowed as GET, notAllowed as PUT, notAllowed as PATCH, notAllowed as DELETE, notAllowed as OPTIONS };
@@ -41,7 +42,8 @@ export async function POST(req: Request) {
       const now = new Date();
       const nextGameBuild = syncedHeartbeatGameBuild(s.gameBuild, b);
       const gameBuildChanged = nextGameBuild !== s.gameBuild;
-      if (s.instanceNonce !== b.instance_nonce) {
+      const restarted = s.instanceNonce !== b.instance_nonce;
+      if (restarted) {
         // New process: every open session not belonging to it is gone.
         await tx.serverSession.updateMany({
           where: { serverId: cred.serverId, endedAt: null, instanceNonce: { not: b.instance_nonce } },
@@ -57,6 +59,8 @@ export async function POST(req: Request) {
           serverRuntime: b.server_runtime,
           players: b.players,
           maxPlayers: b.maxPlayers,
+          // Absent list = leave it alone, except a restart: the old process's list is stale.
+          ...(b.playerAccountIds ? { onlinePlayerIds: b.playerAccountIds, onlinePlayersAt: now } : restarted ? { onlinePlayerIds: [], onlinePlayersAt: null } : {}),
           ...(decision.kind === "adopt"
             ? { buildFamily: b.build_family, protocolVersion: b.protocol_version }
             : {}),
@@ -88,12 +92,12 @@ export async function POST(req: Request) {
           },
         });
       }
-      return { now, maxPlayers: s.adminMaxPlayers };
+      return { now, maxPlayers: s.adminMaxPlayers, versions: await counters(tx, cred.serverId) };
     });
     if (result === "invalid_server") return invalidServer();
     if (result === "build_mismatch") return noStoreJson({ error: "build_mismatch" }, 409);
     // maxPlayers is the admin-set capacity; the dedicated server enforces it live (its reported value is only recorded).
-    return noStoreJson({ ok: true, checkedAt: result.now.toISOString(), maxPlayers: result.maxPlayers });
+    return noStoreJson({ ok: true, checkedAt: result.now.toISOString(), maxPlayers: result.maxPlayers, ...result.versions });
   } catch (err) {
     console.error("server heartbeat failed", err instanceof Error ? err.name : "error");
     return noStoreJson({ error: "server_error" }, 500);
