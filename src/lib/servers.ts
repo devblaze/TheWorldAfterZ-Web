@@ -49,14 +49,21 @@ export function decideHeartbeatBuild(
   return { kind: "mismatch" };
 }
 
+/** Longest ban the panel or the game can set: 365 days. */
+export const BAN_MAX_MINUTES = 525_600;
 export const CLIENT_PLATFORMS = ["win-x64", "linux-x64"] as const;
-export const HEARTBEAT_LIMIT = { perServer: 4, windowMs: 60_000 } as const;
+export const HEARTBEAT_LIMIT = { perServer: 12, windowMs: 60_000 } as const;
 export const heartbeatKey = (serverId: string) => `server-heartbeat:${serverId}`;
 /** Per-server fixed-window limits, counted after the credential check. check allows batched 256-id polls at the 10000-player registry cap; end allows disconnect bursts. */
 export const SERVER_LIMITS = {
   admit: { prefix: "server-admit", limit: 60, windowMs: 60_000 },
   check: { prefix: "server-check", limit: 120, windowMs: 60_000 },
   end: { prefix: "server-end", limit: 600, windowMs: 60_000 },
+  roster: { prefix: "server-roster", limit: 30, windowMs: 60_000 },
+  bans: { prefix: "server-bans", limit: 30, windowMs: 60_000 },
+  commands: { prefix: "server-commands", limit: 30, windowMs: 60_000 },
+  ack: { prefix: "server-ack", limit: 600, windowMs: 60_000 },
+  banWrite: { prefix: "server-ban-write", limit: 30, windowMs: 60_000 },
 } as const;
 export const CHECK_MAX_IDS = 256;
 /** Admin-set capacity bounds (OfficialServer.adminMaxPlayers). Authoritative over the heartbeat-reported maxPlayers. */
@@ -158,6 +165,9 @@ const informational = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/);
 /** game_build stamp: 1–128 printable ASCII, matching the contract $defs/stamp and admit/join. */
 const stamp = z.string().min(1).max(128).regex(/^[\x21-\x7e]+$/);
 
+/** Accounts online on the server, as User.id values. Optional: old servers omit it and leave the stored list alone. */
+const playerAccountIds = z.array(z.string().regex(SERVER_ID)).max(CAPACITY.max).refine((a) => new Set(a).size === a.length, "duplicate id");
+
 export const Heartbeat = z.object({
   game_build: stamp,
   build_family: z.string().min(1).max(64),
@@ -166,6 +176,7 @@ export const Heartbeat = z.object({
   instance_nonce: nonce,
   players: z.number().int().min(0).max(MAX_PLAYERS),
   maxPlayers: z.number().int().min(1).max(MAX_PLAYERS),
+  playerAccountIds: playerAccountIds.optional(),
 }).refine((b) => b.players <= b.maxPlayers);
 
 // Launcher-supplied build fields, shapes from the LAUNCHER freeze $defs (family, protocol, platform, stamp).
@@ -207,5 +218,13 @@ export const AdmitRequest = z.strictObject({
   protocol_version: protocolVersion,
   game_build: stamp,
 });
+/** In-game ban write-back. All four keys are required; null reason / durationMinutes = no reason / permanent. */
+export const ServerBanRequest = z.strictObject({
+  accountId: z.string().min(1).max(64),
+  byAccountId: z.string().min(1).max(64),
+  reason: z.string().trim().min(1).max(200).nullable(),
+  durationMinutes: z.number().int().min(1).max(BAN_MAX_MINUTES).nullable(),
+});
+export const AckRequest = z.strictObject({ result: z.enum(["done", "player_not_found", "failed"]) });
 export const CheckRequest = z.strictObject({ serverSessionIds: z.array(sessionId).max(CHECK_MAX_IDS) });
 export const EndRequest = z.strictObject({ serverSessionId: sessionId, reason: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/) });

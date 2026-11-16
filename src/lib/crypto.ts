@@ -6,6 +6,9 @@ export const KEY_RE = /^TWAZ-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-H
 
 export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
+/** Stable non-PII pseudonym for an account (there is no username in the schema). Shown to game servers and in the moderation panel. */
+export const displayName = (userId: string) => `Player-${sha256(`display:${userId}`).slice(0, 8)}`;
+
 export function generateKey(): string {
   const group = () => Array.from({ length: 4 }, () => CROCKFORD[randomInt(CROCKFORD.length)]).join("");
   return `TWAZ-${group()}-${group()}-${group()}`;

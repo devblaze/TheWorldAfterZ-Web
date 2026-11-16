@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "./db";
+import { canAccessPanel, loadStanding } from "./moderation";
 import { ipFrom } from "./rate-limit";
 
 export const clientIp = async () => ipFrom(await headers());
@@ -46,4 +47,19 @@ export const seeOther = (path: string) => new Response(null, { status: 303, head
 export async function adminOrNull() {
   const user = await currentUser();
   return user?.role === "ADMIN" ? user : null;
+}
+
+/** For API routes: the signed-in moderation-panel user (owner, site admin or game admin) with their standing, or null. Recomputed from the DB on every call. */
+export async function moderatorOrNull() {
+  const user = await currentUser();
+  if (!user) return null;
+  const standing = await loadStanding(prisma, user);
+  return canAccessPanel(standing) ? { user, standing } : null;
+}
+
+export async function requireModerator() {
+  const user = await requireUserPage();
+  const standing = await loadStanding(prisma, user);
+  if (!canAccessPanel(standing)) redirect("/account");
+  return { user, standing };
 }
