@@ -272,7 +272,7 @@ describe("heartbeat", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
     const body = await res.json();
-    expect(body).toEqual({ ok: true, checkedAt: body.checkedAt, maxPlayers: 64 });
+    expect(body).toEqual({ ok: true, checkedAt: body.checkedAt, maxPlayers: 64, rosterVersion: expect.any(Number), bansVersion: expect.any(Number), commandsVersion: expect.any(Number) });
     expect(new Date(body.checkedAt).toISOString()).toBe(body.checkedAt);
     const row = await prisma.officialServer.findUniqueOrThrow({ where: { id } });
     expect(row).toMatchObject({ instanceNonce: n, players: 1, maxPlayers: 16, reportedGameBuild: "0.59.1-linux", gameBuild: "0.59.1-linux", serverRuntime: "linux-x64" });
@@ -430,13 +430,13 @@ describe("heartbeat", () => {
     await resetLimit(id);
     await expectError(await heartbeat.POST(req("/api/servers/heartbeat", { auth: `TwazServer ${id}.${secret}`, raw: "{nope" })), 400, "invalid_request");
     await resetLimit(id);
-    await expectError(await heartbeat.POST(req("/api/servers/heartbeat", { auth: `TwazServer ${id}.${secret}`, raw: " ".repeat(4097) })), 400, "invalid_request");
+    await expectError(await heartbeat.POST(req("/api/servers/heartbeat", { auth: `TwazServer ${id}.${secret}`, raw: " ".repeat(16385) })), 400, "invalid_request");
   });
 
-  it("rate limits to 4 per minute per server, after auth", async () => {
+  it("rate limits to 12 per minute per server, after auth", async () => {
     const { id, secret } = await createServer();
     const n = nonce();
-    for (let i = 0; i < 4; i++) expect((await hb(id, secret, beat(n))).status).toBe(200);
+    for (let i = 0; i < 12; i++) expect((await hb(id, secret, beat(n))).status).toBe(200);
     const limited = await hb(id, secret, beat(n));
     await expectError(limited, 429, "rate_limited");
     // Wrong credentials neither consume nor see the bucket.
@@ -504,7 +504,7 @@ describe("heartbeat", () => {
     expect(await prisma.auditLog.count({ where: { action: "SERVER_BUILD_SYNCED", targetId: id } })).toBe(0);
 
     await resetLimit(id);
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 12; i++) {
       await expectError(await hb(id, secret, beat("short")), 400, "invalid_request");
     }
     const limited = await hb(id, secret, beat(n, { game_build: "0.59.2-linux" }));
