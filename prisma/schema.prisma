@@ -43,6 +43,8 @@ model User {
   createdServers      OfficialServer[]
   joinTickets         JoinTicket[]
   serverSessions      ServerSession[]
+  gameAdmin           GameAdmin?
+  bans                PlayerBan[]
 }
 
 model AccessKey {
@@ -213,6 +215,8 @@ model OfficialServer {
   players           Int          @default(0)
   maxPlayers        Int          @default(0) // last heartbeat-reported value, recorded only
   adminMaxPlayers   Int          @default(64) // admin-set capacity (1-64), authoritative; returned in the heartbeat 200
+  onlinePlayerIds   String[]     @default([]) // account ids from the latest heartbeat that carried playerIds
+  onlinePlayersAt   DateTime? // when onlinePlayerIds was last reported; the panel trusts it only within ONLINE_MS
   createdById       String?
   createdBy         User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt         DateTime     @default(now())
@@ -220,6 +224,8 @@ model OfficialServer {
 
   joinTickets JoinTicket[]
   sessions    ServerSession[]
+  commands    ServerCommand[]
+  bans        PlayerBan[]
 
   @@index([status, lastHeartbeatAt])
 }
@@ -269,4 +275,62 @@ model ServerSession {
   @@unique([serverId, instanceNonce, connectionId])
   @@index([serverId, endedAt])
   @@index([userId, endedAt])
+}
+
+// Panel-promoted game admin (or a stored power override for an ADMIN_EMAILS admin). Counts only while the account is verified.
+// No row for an env admin = all powers. Never grants User.role ADMIN.
+model GameAdmin {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teleport    Boolean  @default(false)
+  godMode     Boolean  @default(false)
+  spawnItems  Boolean  @default(false)
+  kick        Boolean  @default(false)
+  ban         Boolean  @default(false)
+  grantedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// serverId null = global across official servers. Active = revokedAt null AND (expiresAt null OR expiresAt > now). Never deleted.
+model PlayerBan {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serverId     String?
+  server       OfficialServer? @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  reason       String?
+  expiresAt    DateTime?
+  createdById  String?
+  createdAt    DateTime        @default(now())
+  revokedAt    DateTime?
+  revokedById  String?
+  revokeReason String?
+
+  @@index([userId, revokedAt])
+  @@index([serverId])
+}
+
+// A command for a dedicated server to pick up (GET /api/servers/{id}/commands). Pending = ackedAt null AND expiresAt > now.
+model ServerCommand {
+  id          String         @id @default(cuid())
+  serverId    String
+  server      OfficialServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  type        String // "kick"
+  userId      String // target account
+  reason      String?
+  createdById String?
+  banId       String?
+  createdAt   DateTime       @default(now())
+  expiresAt   DateTime
+  ackedAt     DateTime?
+  result      String? // done | player_not_found | failed
+
+  @@index([serverId, ackedAt, expiresAt])
+}
+
+// Version counters the dedicated servers poll: "roster", "bans", "commands:<serverId>". Missing row = 0.
+model ModerationCounter {
+  key   String @id
+  value Int    @default(0)
 }
