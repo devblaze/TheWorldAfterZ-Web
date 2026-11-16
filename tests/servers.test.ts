@@ -2,8 +2,8 @@ import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { sha256 } from "../src/lib/crypto";
 import {
-  Capacity, CreateServer, Endpoint, decideHeartbeatBuild, effectiveCapacity, Heartbeat, LauncherCreateServer, newServerSecret, parseServerAuth,
-  secretMatches, serverStatus, syncedHeartbeatGameBuild,
+  adminListStatus, Capacity, CreateServer, Endpoint, decideHeartbeatBuild, effectiveCapacity, Heartbeat, LauncherCreateServer, newServerSecret, parseServerAuth,
+  ONLINE_MS, secretMatches, serverStatus, syncedHeartbeatGameBuild,
 } from "../src/lib/servers";
 
 // Any DB access throws, to prove the heartbeat fails closed.
@@ -208,6 +208,22 @@ describe("capacity", () => {
     expect(serverStatus({ status: "ACTIVE", secretHash: "h", lastHeartbeatAt: null })).toBe("pending");
     expect(serverStatus({ status: "ACTIVE", secretHash: "h", lastHeartbeatAt: at })).toBe("active");
     expect(serverStatus({ status: "DISABLED", secretHash: "h", lastHeartbeatAt: at })).toBe("disabled");
+  });
+
+  it("admin list status is online only for an ACTIVE server with a fresh lastHeartbeatAt", () => {
+    const now = 1_700_000_000_000;
+    const fresh = new Date(now - 60_000);
+    const stale = new Date(now - ONLINE_MS - 1);
+    const edge = new Date(now - ONLINE_MS);
+    expect(adminListStatus({ status: "ACTIVE", lastHeartbeatAt: fresh }, now)).toBe("online");
+    expect(adminListStatus({ status: "ACTIVE", lastHeartbeatAt: edge }, now)).toBe("online");
+    expect(adminListStatus({ status: "ACTIVE", lastHeartbeatAt: stale }, now)).toBe("offline");
+    expect(adminListStatus({ status: "ACTIVE", lastHeartbeatAt: null }, now)).toBe("offline");
+    expect(adminListStatus({ status: "DISABLED", lastHeartbeatAt: fresh }, now)).toBe("DISABLED");
+    expect(adminListStatus({ status: "UNKNOWN", lastHeartbeatAt: fresh }, now)).toBe("offline");
+    // A missing or stale player-list stamp (onlinePlayersAt) must not change this: status follows the heartbeat.
+    expect(adminListStatus({ status: "ACTIVE", lastHeartbeatAt: fresh }, now)).toBe("online");
+    expect(adminListStatus({ status: "ACTIVE", lastHeartbeatAt: stale }, now)).toBe("offline");
   });
   it("a null stored hash never matches", () => {
     expect(secretMatches("A".repeat(43), null)).toBe(false);

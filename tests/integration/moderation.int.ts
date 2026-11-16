@@ -428,6 +428,30 @@ describe("web panel routes", () => {
     await prisma.officialServer.update({ where: { id: s.id }, data: { onlinePlayersAt: new Date(Date.now() - 120_000) } });
     expect(await page(U.gaKick.id)).toContain("No recent player list");
   });
+
+  it("lists a heartbeating server as online even when it has not reported playerAccountIds", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const freshName = `eu1-fresh-${run}`;
+    const staleName = `eu1-stale-${run}`;
+    await makeServer({ name: freshName, lastHeartbeatAt: new Date(), players: 0, adminMaxPlayers: 64, onlinePlayersAt: null, onlinePlayerIds: [] });
+    await makeServer({
+      name: staleName, lastHeartbeatAt: new Date(Date.now() - 91_000), players: 3, adminMaxPlayers: 64,
+      onlinePlayersAt: new Date(), onlinePlayerIds: [U.player.id],
+    });
+    actor = U.owner.id;
+    const html = renderToStaticMarkup(await ModerationPage({ searchParams: Promise.resolve({}) }));
+    const row = (name: string) => {
+      const i = html.indexOf(name);
+      expect(i, name).toBeGreaterThan(-1);
+      return html.slice(i, html.indexOf("</tr>", i));
+    };
+    expect(row(freshName)).toContain(">online<");
+    expect(row(freshName)).toContain(">0/64<");
+    expect(row(freshName)).not.toContain("unknown");
+    expect(row(staleName)).toContain(">offline<");
+    expect(row(staleName)).toContain(">3/64<");
+    expect(row(staleName)).not.toContain(">online<");
+  });
 });
 
 // ---- helpers: tickets, admit, check, join ----

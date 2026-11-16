@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { requireAdminPage } from "@/lib/session";
-import { ONLINE_MS } from "@/lib/servers";
+import { adminListStatus, adminListStatusClass } from "@/lib/servers";
 import { CreateServerForm, ServerActions } from "./ServerForms";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export default async function AdminServers() {
             </thead>
             <tbody>
               {servers.map((s) => {
-                const online = s.status === "ACTIVE" && !!s.lastHeartbeatAt && now - s.lastHeartbeatAt.getTime() <= ONLINE_MS;
+                const status = adminListStatus(s, now);
                 return (
                   <tr key={s.id} className="border-t border-stone-800 align-top">
                     <td className="p-2">
@@ -54,9 +54,7 @@ export default async function AdminServers() {
                         <div className="text-xs text-amber-400">no secret yet: generate one below to let it heartbeat</div>
                       )}
                     </td>
-                    <td className={s.status === "DISABLED" ? "text-red-400" : online ? "text-green-400" : "text-stone-400"}>
-                      {s.status === "DISABLED" ? "DISABLED" : online ? "online" : "offline"}
-                    </td>
+                    <td className={adminListStatusClass[status]}>{status}</td>
                     <td className="text-stone-400">
                       {s.lastHeartbeatAt ? (
                         <>

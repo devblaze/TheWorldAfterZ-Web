@@ -3,7 +3,7 @@ import { Notice, button, buttonDanger, buttonSecondary, input, one, type SearchP
 import { prisma } from "@/lib/db";
 import { POWER_KEYS, emailFor, rosterUsers } from "@/lib/moderation";
 import { requireModerator } from "@/lib/session";
-import { ONLINE_MS } from "@/lib/servers";
+import { adminListStatus, adminListStatusClass } from "@/lib/servers";
 import { displayName } from "@/lib/crypto";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export default async function Moderation({ searchParams }: { searchParams: Searc
     rosterUsers(prisma),
     prisma.officialServer.findMany({
       where: { status: "ACTIVE" },
-      select: { id: true, name: true, region: true, lastHeartbeatAt: true, onlinePlayerIds: true, onlinePlayersAt: true, players: true },
+      select: { id: true, name: true, region: true, status: true, lastHeartbeatAt: true, players: true, adminMaxPlayers: true },
       orderBy: { createdAt: "desc" },
       take: 200,
     }),
@@ -97,14 +97,15 @@ export default async function Moderation({ searchParams }: { searchParams: Searc
       <section className="space-y-3">
         <h2 className="font-semibold uppercase text-stone-400">Servers</h2>
         <table className="w-full text-left text-sm">
-          <thead className="text-stone-500"><tr><th className="p-2">Server</th><th>Online</th><th /></tr></thead>
+          <thead className="text-stone-500"><tr><th className="p-2">Server</th><th>Status</th><th>Players</th><th /></tr></thead>
           <tbody>
             {servers.map((s) => {
-              const fresh = !!s.onlinePlayersAt && now - s.onlinePlayersAt.getTime() <= ONLINE_MS;
+              const status = adminListStatus(s, now);
               return (
                 <tr key={s.id} className="border-t border-stone-800">
                   <td className="p-2"><div className="font-semibold">{s.name}</div><div className="text-xs text-stone-400">{s.region}</div></td>
-                  <td>{fresh ? s.onlinePlayerIds.length : "unknown"}</td>
+                  <td className={adminListStatusClass[status]}>{status}</td>
+                  <td>{s.lastHeartbeatAt ? `${s.players}/${s.adminMaxPlayers}` : "—"}</td>
                   <td><Link className="underline" href={`/admin/moderation/servers/${s.id}`}>Players</Link></td>
                 </tr>
               );

@@ -160,6 +160,18 @@ export const effectiveCapacity = (s: { adminMaxPlayers: number; maxPlayers: numb
 export const serverStatus = (s: { status: string; secretHash: string | null; lastHeartbeatAt: Date | null }) =>
   s.status !== "ACTIVE" ? "disabled" : !s.secretHash || !s.lastHeartbeatAt ? "pending" : "active";
 
+/** Admin list status: DISABLED, or online/offline from last heartbeat age (ONLINE_MS). Shared by /admin/servers and /admin/moderation. */
+export const adminListStatus = (s: { status: string; lastHeartbeatAt: Date | null }, now = Date.now()) =>
+  s.status === "DISABLED" ? "DISABLED" as const
+    : s.status === "ACTIVE" && !!s.lastHeartbeatAt && now - s.lastHeartbeatAt.getTime() <= ONLINE_MS ? "online" as const
+    : "offline" as const;
+
+export const adminListStatusClass = {
+  DISABLED: "text-red-400",
+  online: "text-green-400",
+  offline: "text-stone-400",
+} as const;
+
 const nonce = z.string().min(16).max(128).regex(/^[\x21-\x7e]+$/);
 const informational = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/);
 /** game_build stamp: 1–128 printable ASCII, matching the contract $defs/stamp and admit/join. */
