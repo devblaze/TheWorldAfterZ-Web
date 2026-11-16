@@ -85,25 +85,33 @@ Send POST `/api/servers/heartbeat` over HTTPS with
   "server_runtime": "linux-x64",
   "instance_nonce": "random-per-process-at-least-16-chars",
   "players": 0,
-  "maxPlayers": 16
+  "maxPlayers": 16,
+  "playerAccountIds": ["clx1abc..."]
 }
 ```
 
-Send every 30 seconds. A server is online for 90 seconds after its latest accepted heartbeat.
+`playerAccountIds` is optional: the account ids (the `accountId` admit returns) of the players online,
+unique, at most 64, each `^[a-z0-9]{1,64}$`; anything else is 400. The numeric `players` stays required.
+A heartbeat without the field leaves the stored list alone, except on a nonce change (restart), which
+clears it. The moderation panel only trusts the list while the heartbeat is within 90 s.
+
+Send every 10 seconds (30 s is also fine); the limit is 12 per minute. A server is online for 90 seconds after its latest accepted heartbeat.
 Only build_family and protocol_version affect compatibility; game_build and server_runtime
 are informational. game_build is 1–128 printable ASCII (the same stamp length as directory,
 join-ticket and admit). server_runtime is 1–64 printable ASCII. The nonce must be 16–128
 printable ASCII characters. Player counts must be integers in 0–10000 with
-players <= maxPlayers; the JSON body is limited to 4096 bytes.
+players <= maxPlayers; the JSON body is limited to 16384 bytes.
 
 Responses are JSON, no-store, and never redirect:
-- 200 `{ok:true,checkedAt,maxPlayers}` (ISO timestamp; maxPlayers is the admin-set capacity,
-  1–64, which the dedicated server enforces live. Until its first 200 the server uses its own config.)
+- 200 `{ok:true,checkedAt,maxPlayers,rosterVersion,bansVersion,commandsVersion}` (ISO timestamp;
+  maxPlayers is the admin-set capacity, 1–64, which the dedicated server enforces live. Until its
+  first 200 the server uses its own config. The three integers change when the admin roster, the ban
+  list or this server's pending commands change; fetch only the changed resource, see docs/MODERATION.md.)
 - 400 `{error:"invalid_request"}`
 - 401 `{error:"invalid_server"}` for invalid, rotated or disabled credentials
 - 409 `{error:"build_mismatch"}` when the same running process reports a different
   build_family or protocol_version
-- 429 `{error:"rate_limited"}` plus Retry-After (4 attempts/minute/server after auth)
+- 429 `{error:"rate_limited"}` plus Retry-After (12 attempts/minute/server after auth)
 - 500 `{error:"server_error"}` (fail closed)
 
 Malformed and incompatible authenticated attempts consume rate-limit capacity. A locked
@@ -122,6 +130,11 @@ unchanged and family or protocol differ, the site returns 409 and leaves the row
 unchanged. A rotation or disable committed before that transaction acquires its row
 lock wins. The admin compatibility edit still exists for manual updates
 (SERVER_COMPAT_UPDATED).
+
+Moderation (roster, bans, kick commands, in-game ban write-back) is in docs/MODERATION.md:
+GET `/api/servers/{id}/admin-roster|bans|commands`, POST `/api/servers/{id}/commands/{cmdId}/ack`,
+POST `/api/servers/{id}/bans`. An open session of a banned account is revoked by
+`sessions/check` with reason `banned`.
 
 The migration also prepares JoinTicket and ServerSession for later steps, including
 instance-scoped connection identities. Audit action names live in src/lib/servers.ts.
@@ -164,6 +177,7 @@ After native auth, the business denials are evaluated in this order and return
 4. server_offline (missing or stale heartbeat)
 5. build_mismatch (family/protocol/client platform)
 6. server_full (last heartbeat players >= effective capacity, see the directory above)
+7. banned (active global ban or one scoped to that server): `{entitled:false,reason:"banned",banExpiresAt:ISO|null}`
 
 Entitlement is checked before the server lookup. Join never returns 404 or 409.
 Success contains ticket, serverId, accountId, nonce, the four echoed build fields,
@@ -206,7 +220,8 @@ POST `/api/servers/admit` takes JSON `ticket`, `instance_nonce` (16–128 printa
 Success is 200 `{admitted:true,accountId,displayName,serverSessionId}`; every denial is
 200 `{admitted:false,reason}` with reason one of ticket_invalid, ticket_used,
 ticket_expired, wrong_server, stale_instance, build_mismatch, no_key, unverified,
-session_revoked. The server must drop the connection on anything else, and on any error
+session_revoked, banned (active global ban or one scoped to this server; checked after the
+entitlement checks, the ticket is already consumed like every other denial, ADMIT_DENY is audited). The server must drop the connection on anything else, and on any error
 or 5 s timeout. displayName is a stable non-PII `Player-xxxxxxxx` derived from the
 account id; it is never the email. Checks, in order:
 1. The conditional UPDATE consumes a ticket only when unused, unexpired, and bound to

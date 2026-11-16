@@ -41,6 +41,7 @@ Unit tests (`npm test`) need no database.
 | `POSTGRES_PASSWORD` | Password for the compose `db` service (compose builds `DATABASE_URL` from it) |
 | `AUTH_SECRET` | Auth.js JWT encryption secret (`openssl rand -base64 32`) |
 | `ADMIN_EMAILS` | Comma-separated admin emails; compose defaults to `nikosantoniadis94@gmail.com`. They still have to verify the email. |
+| `OWNER_EMAILS` | Comma-separated owner emails (moderation panel owner). Must also be in `ADMIN_EMAILS`, verified and role ADMIN. Unset or empty means nobody is owner; it never falls back to `ADMIN_EMAILS` in code. docker-compose defaults it to the same address as `ADMIN_EMAILS` (Nick). |
 | `AUTH_URL` | Public base URL, e.g. `https://theworldafterz.ncatechsolutions.org`. Used for email links and the API origin check |
 | `AUTH_TRUST_HOST` | `true` behind the reverse proxy |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_SECURE` `SMTP_USER` `SMTP_PASS` `SMTP_FROM` | Outgoing mail for verification. Leave `SMTP_HOST` empty to log links instead |

@@ -18,5 +18,8 @@ AUTH_SECRET=<openssl rand -base64 32>              # required: without it every 
 DOWNLOAD_SIGNING_SECRET=<openssl rand -base64 32>  # required for launcher download links
 # docker-compose.yml refuses to start if either is missing. Also set POSTGRES_PASSWORD etc. per README.
 
+## Moderation
+OWNER_EMAILS=<comma-separated owner emails>  # optional; each must also be in ADMIN_EMAILS. Unset/empty = nobody is owner (never falls back to ADMIN_EMAILS)
+
 ## Cloudflare note
 Confirm EasyDeploy forwards CF-Connecting-IP or X-Forwarded-For for rate limits.
