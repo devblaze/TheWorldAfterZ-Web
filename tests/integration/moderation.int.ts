@@ -18,6 +18,8 @@ process.env.ADMIN_EMAILS = [mail("owner"), mail("env"), mail("env2")].join(",");
 // The signed-in browser user, read by currentUser(); the pages and web routes recompute the standing from the DB.
 let actor: string | null = null;
 vi.mock("@/auth", () => ({ auth: async () => (actor ? { user: { id: actor }, issuedPwdAt: 0 } : null) }));
+// /admin/servers renders client forms that need a mounted app router; only the server-rendered rows are under test here.
+vi.mock("@/app/admin/servers/ServerForms", () => ({ CreateServerForm: () => null, ServerActions: () => null }));
 
 const { prisma } = await import("@/lib/db");
 const { sha256, displayName } = await import("@/lib/crypto");
@@ -42,6 +44,8 @@ const join = await import("@/app/api/launcher/join-ticket/route");
 const ModerationPage = (await import("@/app/admin/moderation/page")).default;
 const BansPage = (await import("@/app/admin/moderation/bans/page")).default;
 const PlayersPage = (await import("@/app/admin/moderation/servers/[id]/page")).default;
+const ServersPage = (await import("@/app/admin/servers/page")).default;
+const directory = await import("@/app/api/launcher/servers/route");
 
 const BASE = process.env.AUTH_URL!;
 const family = `fam-${run}`;
@@ -913,6 +917,107 @@ describe("heartbeat: playerAccountIds and versions", () => {
     const limited = await rawBeat(S, base());
     await expectError(limited, 429, "rate_limited");
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+});
+
+describe("heartbeat: updater status", () => {
+  const stored = (id: string) => prisma.officialServer.findUniqueOrThrow({ where: { id }, select: { updaterState: true, updaterReason: true, updaterReportedAt: true } });
+  const again = (s: Server) => prisma.rateLimit.deleteMany({ where: { key: heartbeatKey(s.id) } });
+
+  it("stores ok, then halted with its reason, and answers the unchanged 200 shape", async () => {
+    const S = await makeServer();
+    const ok = await beat(S, { updater: { state: "ok" } });
+    expect(ok.status).toBe(200);
+    expect(Object.keys(await ok.json()).sort()).toEqual(["bansVersion", "checkedAt", "commandsVersion", "maxPlayers", "ok", "rosterVersion"]);
+    const a = await stored(S.id);
+    expect(a).toMatchObject({ updaterState: "ok", updaterReason: null });
+    expect(Date.now() - a.updaterReportedAt!.getTime()).toBeLessThan(10_000);
+
+    expect((await beat(S, { updater: { state: "halted", reason: "rollback of playtest-0.64-abc1234 was not healthy" } })).status).toBe(200);
+    expect(await stored(S.id)).toMatchObject({ updaterState: "halted", updaterReason: "rollback of playtest-0.64-abc1234 was not healthy" });
+
+    expect((await beat(S, { updater: { state: "halted" } })).status).toBe(200); // the game omits an empty reason
+    expect(await stored(S.id)).toMatchObject({ updaterState: "halted", updaterReason: null });
+
+    expect((await beat(S, { updater: { state: "ok" } })).status).toBe(200); // unhalt clears the reason
+    expect(await stored(S.id)).toMatchObject({ updaterState: "ok", updaterReason: null });
+  });
+
+  it("accepts a heartbeat without the field (old build) and clears a stored halt", async () => {
+    const S = await makeServer({ updaterState: "halted", updaterReason: "stale", updaterReportedAt: new Date(Date.now() - 60_000) });
+    const res = await beat(S);
+    expect(res.status).toBe(200);
+    expect(await stored(S.id)).toEqual({ updaterState: null, updaterReason: null, updaterReportedAt: null });
+    expect((await prisma.officialServer.findUniqueOrThrow({ where: { id: S.id } })).lastHeartbeatAt!.getTime()).toBeGreaterThan(Date.now() - 10_000);
+  });
+
+  it("clamps an over-long reason to 200 and stores a multi-line one as one line", async () => {
+    const S = await makeServer();
+    expect((await beat(S, { updater: { state: "halted", reason: "y".repeat(999) } })).status).toBe(200);
+    expect((await stored(S.id)).updaterReason).toBe("y".repeat(200));
+    expect((await beat(S, { updater: { state: "halted", reason: "first\r\nsecond\u0007\tthird\n" } })).status).toBe(200);
+    expect((await stored(S.id)).updaterReason).toBe("first second third");
+  });
+
+  it("400s an invalid updater and keeps the stored status and last heartbeat", async () => {
+    const at = new Date(Date.now() - 30_000);
+    const S = await makeServer({ updaterState: "halted", updaterReason: "keep me", updaterReportedAt: at, lastHeartbeatAt: at });
+    for (const updater of [{ state: "weird" }, { state: "halted", reason: 7 }, { reason: "x" }, "halted", null, [], { state: "halted", reason: "z".repeat(1001) }]) {
+      await again(S);
+      await expectError(await beat(S, { updater }), 400, "invalid_request");
+    }
+    expect(await stored(S.id)).toEqual({ updaterState: "halted", updaterReason: "keep me", updaterReportedAt: at });
+    expect((await prisma.officialServer.findUniqueOrThrow({ where: { id: S.id } })).lastHeartbeatAt!.getTime()).toBe(at.getTime());
+  });
+
+  it("keeps the auth and rate-limit order: 401 before validation, 429 before validation", async () => {
+    const S = await makeServer();
+    const bad = { ...S, secret: randomBytes(32).toString("base64url") };
+    await expectError(await beat(bad, { updater: { state: "weird" } }), 401, "invalid_server");
+    for (let i = 0; i < 12; i++) expect((await beat(S, { updater: { state: "ok" } })).status).toBe(200);
+    await expectError(await beat(S, { updater: { state: "weird" } }), 429, "rate_limited");
+  });
+
+  it("shows a red, escaped banner on the halted server's /admin/moderation row only, and on /admin/servers", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const halted = await makeServer({ name: `upd-halt-${run}` });
+    const ok = await makeServer({ name: `upd-ok-${run}` });
+    const none = await makeServer({ name: `upd-none-${run}` });
+    const evil = `<script>alert("x")</script> & <b>bold</b>`;
+    expect((await beat(halted, { updater: { state: "halted", reason: evil } })).status).toBe(200);
+    expect((await beat(ok, { updater: { state: "ok" } })).status).toBe(200);
+    expect((await beat(none)).status).toBe(200);
+
+    actor = U.gaNone.id; // any moderator sees it
+    const html = renderToStaticMarkup(await ModerationPage({ searchParams: Promise.resolve({}) }));
+    const escaped = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &lt;b&gt;bold&lt;/b&gt;";
+    expect(html).toContain(escaped);
+    expect(html).not.toContain("<script>alert");
+    expect(html).not.toContain("<b>bold");
+    const banner = html.indexOf(`data-updater-row="${halted.id}"`);
+    expect(banner).toBeGreaterThan(html.indexOf(`upd-halt-${run}`));
+    expect(html.slice(banner, html.indexOf("</tr>", banner))).toContain("Updater halted:");
+    expect(html).not.toContain(`data-updater-row="${ok.id}"`);
+    expect(html).not.toContain(`data-updater-row="${none.id}"`);
+    expect(html.split(escaped)).toHaveLength(2); // exactly one banner carries this reason
+
+    actor = U.site.id;
+    const servers = renderToStaticMarkup(await ServersPage());
+    expect(servers).toContain(escaped);
+    expect(servers.split(escaped)).toHaveLength(2);
+    expect(servers).not.toContain("<script>alert");
+  });
+
+  it("is not on the public launcher directory", async () => {
+    const S = await makeServer({ updaterState: "halted", updaterReason: "hidden-reason", updaterReportedAt: new Date() });
+    const u = await fresh("updir");
+    const q = new URLSearchParams({ build_family: family, protocol_version: "3", client_platform: "win-x64", game_build: "0.59.1" });
+    const res = await directory.GET(new NextRequest(new URL(`/api/launcher/servers?${q}`, BASE), { headers: { authorization: `Bearer ${u.token}` } }));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain(S.id);
+    expect(text).not.toContain("hidden-reason");
+    expect(text).not.toContain("updater");
   });
 });
 

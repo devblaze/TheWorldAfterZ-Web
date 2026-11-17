@@ -180,6 +180,57 @@ const stamp = z.string().min(1).max(128).regex(/^[\x21-\x7e]+$/);
 /** Accounts online on the server, as User.id values. Optional: old servers omit it and leave the stored list alone. */
 const playerAccountIds = z.array(z.string().regex(SERVER_ID)).max(CAPACITY.max).refine((a) => new Set(a).size === a.length, "duplicate id");
 
+/** Max stored/displayed updater halt reason, in UTF-16 code units (same unit and bound as the game's MaxUpdaterReasonLength). */
+export const UPDATER_REASON_MAX = 200;
+/** A raw reason longer than this is not a one-liner from the game: reject the heartbeat instead of clamping it. */
+const UPDATER_REASON_RAW_MAX = 1000;
+
+/**
+ * Same cleaning as the game's OfficialMessages.SanitizeUpdaterReason, plus C1/DEL and Unicode line/paragraph
+ * separators: CR/LF/TAB/U+2028/U+2029 become one space, other control characters are dropped, then the text is
+ * cut to UPDATER_REASON_MAX and trimmed. "" means no reason.
+ */
+export function sanitizeUpdaterReason(raw: string): string {
+  let out = "";
+  for (const ch of raw) {
+    const c = ch.codePointAt(0)!;
+    if (c === 0x0a || c === 0x0d || c === 0x09 || c === 0x2028 || c === 0x2029) {
+      if (out.length > 0 && !out.endsWith(" ")) out += " ";
+      continue;
+    }
+    if (c < 0x20 || (c >= 0x7f && c <= 0x9f)) continue;
+    if (out.length + ch.length > UPDATER_REASON_MAX) break; // never split a surrogate pair
+    out += ch;
+  }
+  return out.trim();
+}
+
+/**
+ * Optional heartbeat `updater` (game PR #79, docs/OFFICIAL_SERVER_UPDATER.md there): {"state":"ok"} or
+ * {"state":"halted","reason":"..."}. Unknown state or a non-object is a 400 like any other bad field. A halted
+ * report without a reason (the game omits an empty one) is accepted and stored with reason null.
+ */
+const updater = z.object({
+  state: z.enum(["ok", "halted"]),
+  reason: z.string().max(UPDATER_REASON_RAW_MAX).optional(),
+}).transform((u) => {
+  const reason = u.state === "halted" && u.reason !== undefined ? sanitizeUpdaterReason(u.reason) : "";
+  return { state: u.state, reason: reason || null };
+});
+export type HeartbeatUpdater = z.output<typeof updater>;
+
+/**
+ * OfficialServer columns for an accepted heartbeat. A heartbeat without `updater` clears them (old build, or a
+ * downgrade): a halt banner then never outlives the process that reported it.
+ */
+export const updaterColumns = (u: HeartbeatUpdater | undefined, now: Date) =>
+  u ? { updaterState: u.state, updaterReason: u.reason, updaterReportedAt: now }
+    : { updaterState: null, updaterReason: null, updaterReportedAt: null };
+
+/** Admin view: the halt to show as a banner, or null when ok / never reported. */
+export const updaterHalt = (s: { updaterState: string | null; updaterReason: string | null; updaterReportedAt: Date | null }) =>
+  s.updaterState === "halted" ? { reason: s.updaterReason, reportedAt: s.updaterReportedAt } : null;
+
 export const Heartbeat = z.object({
   game_build: stamp,
   build_family: z.string().min(1).max(64),
@@ -189,6 +240,7 @@ export const Heartbeat = z.object({
   players: z.number().int().min(0).max(MAX_PLAYERS),
   maxPlayers: z.number().int().min(1).max(MAX_PLAYERS),
   playerAccountIds: playerAccountIds.optional(),
+  updater: updater.optional(),
 }).refine((b) => b.players <= b.maxPlayers);
 
 // Launcher-supplied build fields, shapes from the LAUNCHER freeze $defs (family, protocol, platform, stamp).
