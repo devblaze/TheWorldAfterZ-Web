@@ -382,7 +382,8 @@ model BugReport {
   replayContentType String?
   createdAt         DateTime @default(now())
 
-  screenshots BugReportScreenshot[]
+  screenshots  BugReportScreenshot[]
+  trackerLink  BugReportTrackerLink?
 
   @@index([createdAt])
   @@index([userId])
@@ -406,3 +407,27 @@ model BugReportScreenshot {
   @@unique([reportId, index])
 }
 
+
+// Outbox + mapping for SuperTracker issue sync. issueKey is set as soon as an issue is created
+// or a duplicate is attached, so retries never open a second issue.
+model BugReportTrackerLink {
+  id           String    @id @default(cuid())
+  reportId     String    @unique
+  report       BugReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  issueKey     String?
+  issueUrl     String?
+  dedupeKey    String
+  title        String
+  status       String    @default("pending")
+  attemptCount Int       @default(0)
+  lastError    String?
+  nextAttemptAt DateTime @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  syncedAt     DateTime?
+  failedAt     DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([dedupeKey, createdAt])
+  @@index([issueKey])
+}

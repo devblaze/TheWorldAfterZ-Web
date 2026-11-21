@@ -85,6 +85,8 @@ const Session = z.object({
   map: text(128),
   playerCount: z.number().int().min(0).max(10_000),
   inMenu: z.boolean(),
+  character: text(128).optional(),
+  characterName: text(128).optional(),
 });
 
 const LogLine = z.object({
@@ -97,6 +99,9 @@ export const BugReportBody = z.object({
   schemaVersion: z.literal(1),
   category: z.enum(CATEGORIES),
   description: z.string().trim().min(10).max(4000),
+  // Optional; not in the U13 contract. Used as the SuperTracker issue title when present.
+  summary: z.string().max(255).optional(),
+  title: z.string().max(255).optional(),
   includeReplay: z.boolean(),
   clientSubmittedAt: isoDate,
   build: Build,

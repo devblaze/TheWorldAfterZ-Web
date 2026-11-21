@@ -33,3 +33,12 @@ BUG_REPORT_STORAGE_DIR=/var/lib/twaz/bug-reports
 # Optional; default 90. The app also runs the 90-day sweep once a day in-process.
 # Manual: `docker compose exec app npm run bug-reports:sweep`
 BUG_REPORT_RETENTION_DAYS=90
+
+## SuperTracker (in-game bug reports)
+
+# Optional. When unset, reports still work and no tracker issue is created.
+# Dedicated 'TWAZ Bug Reporter' service-account token — names only here, never the value.
+SUPERTRACKER_TOKEN=<service-account token>
+# Optional; defaults shown.
+SUPERTRACKER_URL=https://tracker.ncatechsolutions.org
+SUPERTRACKER_PROJECT=TWAZ

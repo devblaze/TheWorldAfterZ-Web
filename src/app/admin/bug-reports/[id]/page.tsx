@@ -7,6 +7,7 @@ import { requireBugReportsPage } from "@/lib/session";
 import { Notice, buttonSecondary } from "@/components/ui";
 import { REPORT_ID_RE } from "@/lib/bug-reports";
 import { bugReportStorageBannerText, checkBugReportStorage } from "@/lib/bug-report-storage";
+import { DEFAULT_SUPERTRACKER_URL } from "@/lib/bug-report-tracker";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,47 @@ function MetaTable({ title, data }: { title: string; data: Record<string, unknow
   );
 }
 
+
+function trackerIssueHref(link: { issueKey: string | null; issueUrl: string | null }) {
+  if (link.issueUrl) return link.issueUrl;
+  if (link.issueKey) return `${DEFAULT_SUPERTRACKER_URL}/browse/${link.issueKey}`;
+  return null;
+}
+
+function TrackerSyncSection({ link }: {
+  link: {
+    status: string;
+    issueKey: string | null;
+    issueUrl: string | null;
+    attemptCount: number;
+    lastError: string | null;
+    nextAttemptAt: Date;
+  } | null;
+}) {
+  const href = link ? trackerIssueHref(link) : null;
+  const keyLink = href && link?.issueKey
+    ? <a className="underline" href={href} rel="noreferrer">{link.issueKey}</a>
+    : link?.issueKey;
+  let body;
+  if (!link) {
+    body = "Not queued. SuperTracker sync is off unless SUPERTRACKER_TOKEN is set when the report is accepted.";
+  } else if (link.status === "synced" && link.issueKey) {
+    body = <>Synced to {keyLink}.</>;
+  } else if (link.status === "failed") {
+    body = <>Failed after {link.attemptCount} attempt(s){link.lastError ? ` (${link.lastError})` : ""}.{keyLink ? <> Linked to {keyLink}.</> : null}</>;
+  } else if (link.status === "pending_comment" && link.issueKey) {
+    body = <>Linked to {keyLink}; waiting to add a comment (attempt {link.attemptCount}).</>;
+  } else {
+    body = <>Pending sync (attempt {link.attemptCount}).</>;
+  }
+  return (
+    <section className="space-y-2">
+      <h2 className="font-semibold uppercase text-stone-400">SuperTracker</h2>
+      <p className="text-sm text-stone-200">{body}</p>
+    </section>
+  );
+}
+
 export default async function AdminBugReport({ params }: { params: Promise<{ id: string }> }) {
   const { standing } = await requireBugReportsPage();
   const storage = await checkBugReportStorage();
@@ -44,7 +86,7 @@ export default async function AdminBugReport({ params }: { params: Promise<{ id:
   if (!REPORT_ID_RE.test(id)) notFound();
   const row = await prisma.bugReport.findUnique({
     where: { id },
-    include: { user: { select: { email: true } }, screenshots: { orderBy: { index: "asc" } } },
+    include: { user: { select: { email: true } }, screenshots: { orderBy: { index: "asc" } }, trackerLink: true },
   });
   if (!row) notFound();
   const logTail = Array.isArray(row.logTail) ? row.logTail as { t?: number; lv?: string; m?: string }[] : [];
@@ -62,6 +104,8 @@ export default async function AdminBugReport({ params }: { params: Promise<{ id:
         <h2 className="font-semibold uppercase text-stone-400">Description</h2>
         <p className="whitespace-pre-wrap text-sm text-stone-200">{row.description}</p>
       </section>
+
+      <TrackerSyncSection link={row.trackerLink} />
 
       <MetaTable title="Build" data={{ version: row.buildVersion, family: row.buildFamily, sha: row.buildSha, branch: row.buildBranch, date: row.buildDate }} />
       <MetaTable title="Network" data={asRecord(row.net)} />
