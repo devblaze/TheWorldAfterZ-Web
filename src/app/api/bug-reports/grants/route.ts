@@ -4,6 +4,7 @@ import { methodNotAllowed, readJsonBody } from "@/lib/launcher/http";
 import { authenticateAccess, bearerToken } from "@/lib/launcher/store";
 import { activeRedemption } from "@/lib/session";
 import { limitBugReportGrant } from "@/lib/rate-limit";
+import { bugReportsUnavailableResponse, checkBugReportStorage } from "@/lib/bug-report-storage";
 import {
   BUG_REPORT_AUDIT, GRANT_TTL_SEC_DEFAULT, GrantRequest, newUploadToken, reportJson,
 } from "@/lib/bug-reports";
@@ -16,6 +17,8 @@ export { notAllowed as GET, notAllowed as PUT, notAllowed as PATCH, notAllowed a
 
 export async function POST(req: Request) {
   try {
+    const storage = await checkBugReportStorage();
+    if (!storage.ok) return bugReportsUnavailableResponse();
     const token = bearerToken(req.headers.get("authorization"));
     if (!token) return reportJson({ error: "invalid_token" }, 401);
     const auth = await authenticateAccess(token);

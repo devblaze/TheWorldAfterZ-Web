@@ -2,12 +2,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BugReportBody, GRANT_TTL_SEC_MAX, GrantRequest, REPORT_ID_RE, REQUEST_MAX_BYTES,
   findForbiddenReportContent, isGzip, isJpeg, newReportId, readBodyCapped, retryAfterFrom,
 } from "../src/lib/bug-reports";
-import { assertBugReportStorage, bugReportStorageDir, getBugReportBlob, isUnderTmp, putBugReportBlob, removeBugReportBlob } from "../src/lib/bug-report-storage";
+import {
+  STORAGE_CHECK_RETRY_AFTER_SEC, bugReportStorageBannerText, bugReportStorageDir, bugReportsUnavailableResponse,
+  checkBugReportStorage, getBugReportBlob, isUnderTmp, putBugReportBlob, removeBugReportBlob, resetBugReportStorageCheck,
+} from "../src/lib/bug-report-storage";
 import { resetBugReportSweepScheduler, runBugReportSweepGuarded, startBugReportSweepScheduler } from "../src/lib/bug-report-sweep-schedule";
 
 const valid = {
@@ -129,6 +133,20 @@ describe("filesystem storage", () => {
 });
 
 describe("production storage dir", () => {
+  const prevDir = process.env.BUG_REPORT_STORAGE_DIR;
+  const prevSecret = process.env.LAUNCHER_TOKEN_SECRET;
+  const cleanup: string[] = [];
+
+  afterEach(async () => {
+    resetBugReportStorageCheck();
+    if (prevDir === undefined) delete process.env.BUG_REPORT_STORAGE_DIR;
+    else process.env.BUG_REPORT_STORAGE_DIR = prevDir;
+    vi.unstubAllEnvs();
+    if (prevSecret === undefined) delete process.env.LAUNCHER_TOKEN_SECRET;
+    else process.env.LAUNCHER_TOKEN_SECRET = prevSecret;
+    for (const p of cleanup.splice(0)) await rm(p, { recursive: true, force: true });
+  });
+
   it("treats /tmp and its children as forbidden, but not /var/tmp or a similarly prefixed path", () => {
     expect(isUnderTmp("/tmp")).toBe(true);
     expect(isUnderTmp("/tmp/twaz-bug-reports")).toBe(true);
@@ -138,21 +156,81 @@ describe("production storage dir", () => {
     expect(isUnderTmp("/tmpfoo")).toBe(false);
   });
 
-  it("fails production startup when the dir is missing or under /tmp, and allows a durable path", () => {
-    expect(() => assertBugReportStorage({ NODE_ENV: "production" })).toThrow(/BUG_REPORT_STORAGE_DIR/);
-    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: " " })).toThrow(/BUG_REPORT_STORAGE_DIR/);
-    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: "/tmp" })).toThrow(/under \/tmp/);
-    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: "/tmp/bugs" })).toThrow(/under \/tmp/);
-    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: "/var/lib/twaz/bug-reports" })).not.toThrow();
-    expect(() => assertBugReportStorage({ NODE_ENV: "test" })).not.toThrow();
-  });
-
   it("does not fall back to /tmp when the variable is unset", () => {
-    const prev = process.env.BUG_REPORT_STORAGE_DIR;
     delete process.env.BUG_REPORT_STORAGE_DIR;
     expect(() => bugReportStorageDir()).toThrow(/BUG_REPORT_STORAGE_DIR is not set/);
-    if (prev === undefined) delete process.env.BUG_REPORT_STORAGE_DIR;
-    else process.env.BUG_REPORT_STORAGE_DIR = prev;
+  });
+
+  it("marks storage unavailable when the dir is unset, under /tmp, or not writable, and available when writable", async () => {
+    delete process.env.BUG_REPORT_STORAGE_DIR;
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: false, reason: "unset" });
+    resetBugReportStorageCheck();
+    process.env.BUG_REPORT_STORAGE_DIR = " ";
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: false, reason: "unset" });
+    resetBugReportStorageCheck();
+    process.env.BUG_REPORT_STORAGE_DIR = "/tmp/twaz-bug-reports-probe";
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: false, reason: "under_tmp" });
+    resetBugReportStorageCheck();
+    const blocked = path.join("/var/tmp", `twaz-br-blocked-${randomBytes(4).toString("hex")}`);
+    await writeFile(blocked, "not-a-dir");
+    cleanup.push(blocked);
+    process.env.BUG_REPORT_STORAGE_DIR = blocked;
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: false, reason: "not_writable" });
+    resetBugReportStorageCheck();
+    const dir = await mkdtemp(path.join("/var/tmp", "twaz-br-ok-"));
+    cleanup.push(dir);
+    process.env.BUG_REPORT_STORAGE_DIR = dir;
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: true });
+  });
+
+  it("caches the probe and re-checks after the TTL so a later writable dir can recover", async () => {
+    const blocked = path.join("/var/tmp", `twaz-br-cache-${randomBytes(4).toString("hex")}`);
+    await writeFile(blocked, "not-a-dir");
+    cleanup.push(blocked);
+    process.env.BUG_REPORT_STORAGE_DIR = blocked;
+    resetBugReportStorageCheck({ ttlMs: 30 });
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: false, reason: "not_writable" });
+    await rm(blocked);
+    const dir = await mkdtemp(path.join("/var/tmp", "twaz-br-recover-"));
+    cleanup.push(dir);
+    process.env.BUG_REPORT_STORAGE_DIR = dir;
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: false, reason: "not_writable" });
+    await new Promise((r) => setTimeout(r, 40));
+    await expect(checkBugReportStorage()).resolves.toEqual({ ok: true });
+  });
+
+  it("register() never throws for unset, under /tmp, or not-writable storage, including in production", async () => {
+    process.env.LAUNCHER_TOKEN_SECRET = "a".repeat(32);
+    vi.stubEnv("NODE_ENV", "production");
+    delete process.env.NEXT_PHASE;
+    const { register } = await import("../src/instrumentation");
+    delete process.env.BUG_REPORT_STORAGE_DIR;
+    await expect(register()).resolves.toBeUndefined();
+    resetBugReportStorageCheck();
+    process.env.BUG_REPORT_STORAGE_DIR = "/tmp/twaz-br-boot";
+    await expect(register()).resolves.toBeUndefined();
+    resetBugReportStorageCheck();
+    const blocked = path.join("/var/tmp", `twaz-br-boot-${randomBytes(4).toString("hex")}`);
+    await writeFile(blocked, "not-a-dir");
+    cleanup.push(blocked);
+    process.env.BUG_REPORT_STORAGE_DIR = blocked;
+    await expect(register()).resolves.toBeUndefined();
+    resetBugReportStorageCheck();
+    const dir = await mkdtemp(path.join("/var/tmp", "twaz-br-boot-ok-"));
+    cleanup.push(dir);
+    process.env.BUG_REPORT_STORAGE_DIR = dir;
+    await expect(register()).resolves.toBeUndefined();
+  });
+
+  it("builds a 503 bug_reports_unavailable body with Retry-After and an escaped banner for each reason", () => {
+    expect(bugReportStorageBannerText("unset")).toBe("Bug report storage isn't configured (unset).");
+    expect(bugReportStorageBannerText("under_tmp")).toBe("Bug report storage isn't configured (under_tmp).");
+    expect(bugReportStorageBannerText("not_writable")).toBe("Bug report storage isn't configured (not_writable).");
+    const res = bugReportsUnavailableResponse();
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe(String(STORAGE_CHECK_RETRY_AFTER_SEC));
+    expect(res.headers.get("cache-control")).toMatch(/no-store/);
+    return expect(res.json()).resolves.toEqual({ error: "bug_reports_unavailable" });
   });
 });
 

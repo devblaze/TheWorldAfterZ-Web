@@ -86,9 +86,10 @@ Other methods: 405. CSRF: both paths are exempt in `src/proxy.ts` (launcher/game
 
 Blobs (replay + screenshots) go to a local directory via a small filesystem driver (`src/lib/bug-report-storage.ts`):
 
-- `BUG_REPORT_STORAGE_DIR` is required in production. There is no `/tmp` default. At process start (`src/instrumentation.ts`), if `NODE_ENV=production` and the variable is unset or resolves under `/tmp`, the process refuses to start.
-- docker-compose sets `BUG_REPORT_STORAGE_DIR` to `/var/lib/twaz/bug-reports` and mounts the named volume `bug-reports` there (the compose network/subnet is unchanged). Local and CI tests set the variable to a throwaway directory.
-- Server-generated random file names only; never a player-supplied name, never a public URL. sha256 and byte length are recorded in Postgres.
+- There is no `/tmp` default. The Dockerfile runner sets `ENV BUG_REPORT_STORAGE_DIR=/var/lib/twaz/bug-reports` and creates that directory (owned by `app`). docker-compose also sets the same path and mounts the named volume `bug-reports` there (the compose network/subnet is unchanged). Local and CI tests use a throwaway directory that is not under `/tmp`.
+- EasyDeploy service A (prod) builds from the Dockerfile as a single image, not compose, and currently has no volume. The site **always boots**: a soft check at process start (`src/instrumentation.ts`) never throws. Storage is marked unavailable when the variable is unset, the path resolves under `/tmp`, or a write/delete probe fails. The result is cached for 30 seconds and re-checked so a later writable disk can recover. One startup warning logs the reason category (`unset`, `under_tmp`, or `not_writable`) and never logs secrets. When storage is available, a startup warning reminds operators that reports will not survive redeploys unless a persistent volume is mounted at that path.
+- While storage is unavailable, `POST /api/bug-reports/grants` and `POST /api/bug-reports` return **503** `{ "error": "bug_reports_unavailable" }` with `Retry-After` (grants are not minted; existing grants are not consumed). Admin replay/screenshot routes return the same 503. The admin list and viewer still load and show a red banner with the reason category. The daily sweep skips its run.
+- Server-generated random file names only; never a player-supplied name, never a public URL. sha256 and byte length are recorded in Postgres. An Unraid share remains out of scope.
 
 Metadata (including `logTail`, build, perf, net, session) is in Postgres (`BugReport`, `BugReportScreenshot`, `BugReportGrant`).
 
@@ -114,6 +115,6 @@ For Unity (unchanged):
 - Confirm they can POST multipart and that the launcher will call `/api/bug-reports/grants` then hand only `uploadToken` + `expiresAt` (and the upload URL) to the game.
 - Any extra replay-header fields to freeze now for a later staff playback viewer?
 
-Lead decisions already applied: persistent named Docker volume (not `/tmp`, Unraid mount out of scope); in-process daily 90-day sweep (manual script kept); access is the owner plus the `bugReports` power; grants still require an active key; listen/direct reports are accepted and tagged; grant minting stays 10/hour.
+Lead decisions already applied: persistent named Docker volume recommended (not `/tmp`, Unraid mount out of scope); Dockerfile ENV default plus a soft storage check so an EasyDeploy single-image deploy still boots; in-process daily 90-day sweep (skipped when storage is unavailable; manual script kept); access is the owner plus the `bugReports` power; grants still require an active key; listen/direct reports are accepted and tagged; grant minting stays 10/hour.
 
 Do not merge this PR without Nick's go-ahead: merging `main` auto-deploys production.

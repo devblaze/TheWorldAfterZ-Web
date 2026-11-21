@@ -8,7 +8,7 @@ import {
   SCREENSHOTS_MAX_COUNT, SCREENSHOTS_TOTAL_MAX, contentTypeOf, findForbiddenReportContent, invalidReport,
   isGzip, isJpeg, newReportId, readBodyCapped, reportJson, retryAfterFrom, type BugReportPayload,
 } from "@/lib/bug-reports";
-import { putBugReportBlob, removeBugReportBlob } from "@/lib/bug-report-storage";
+import { bugReportsUnavailableResponse, checkBugReportStorage, putBugReportBlob, removeBugReportBlob } from "@/lib/bug-report-storage";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -131,6 +131,8 @@ async function parseScreenshots(form: FormData, includeReplay: boolean): Promise
 export async function POST(req: Request) {
   const stored: string[] = [];
   try {
+    const storage = await checkBugReportStorage();
+    if (!storage.ok) return bugReportsUnavailableResponse();
     const token = bearerToken(req.headers.get("authorization"));
     if (!token) return reportJson({ error: "unauthorized" }, 401);
 

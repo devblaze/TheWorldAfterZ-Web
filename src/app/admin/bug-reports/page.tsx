@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { input, one, type SearchParams } from "@/components/ui";
+import { Notice, input, one, type SearchParams } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import { displayName } from "@/lib/crypto";
 import { emailFor } from "@/lib/moderation";
 import { requireBugReportsPage } from "@/lib/session";
 import { CATEGORIES, NET_MODES } from "@/lib/bug-reports";
+import { bugReportStorageBannerText, checkBugReportStorage } from "@/lib/bug-report-storage";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ const displayTime = (date: Date) => new Intl.DateTimeFormat("en-GB", {
 
 export default async function AdminBugReports({ searchParams }: { searchParams: SearchParams }) {
   const { standing } = await requireBugReportsPage();
+  const storage = await checkBugReportStorage();
   const sp = await searchParams;
   const category = one(sp.category)?.trim() ?? "";
   const build = one(sp.build)?.trim() ?? "";
@@ -40,6 +42,7 @@ export default async function AdminBugReports({ searchParams }: { searchParams: 
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold uppercase tracking-widest text-amber-500">Bug reports</h1>
+      {!storage.ok && <Notice kind="error">{bugReportStorageBannerText(storage.reason)}</Notice>}
       <form className="flex flex-wrap gap-3 text-sm" method="get">
         <select className={input} name="category" defaultValue={category} aria-label="Category">
           <option value="">All categories</option>

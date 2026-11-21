@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { bugReportsAdminOrNull, json } from "@/lib/session";
-import { getBugReportBlob } from "@/lib/bug-report-storage";
+import { bugReportsUnavailableResponse, checkBugReportStorage, getBugReportBlob } from "@/lib/bug-report-storage";
 import { REPLAY_CONTENT_TYPE, REPORT_ID_RE } from "@/lib/bug-reports";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +9,8 @@ export const runtime = "nodejs";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const admin = await bugReportsAdminOrNull();
   if (!admin) return json({ error: "forbidden" }, 403);
+  const storage = await checkBugReportStorage();
+  if (!storage.ok) return bugReportsUnavailableResponse();
   const { id } = await params;
   if (!REPORT_ID_RE.test(id)) return json({ error: "not_found" }, 404);
   const row = await prisma.bugReport.findUnique({

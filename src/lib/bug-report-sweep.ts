@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/db";
 import { BUG_REPORT_AUDIT, RETENTION_DAYS } from "@/lib/bug-reports";
-import { removeBugReportBlob } from "@/lib/bug-report-storage";
+import { checkBugReportStorage, removeBugReportBlob } from "@/lib/bug-report-storage";
 
 export async function sweepExpiredBugReports(now = new Date(), days = RETENTION_DAYS) {
+  const storage = await checkBugReportStorage();
+  if (!storage.ok) return { deleted: 0, removedBlobs: 0, expiredGrants: 0, skipped: true as const };
   const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
   const grantCutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const stale = await prisma.bugReport.findMany({

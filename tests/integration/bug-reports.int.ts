@@ -1,11 +1,10 @@
 // Bug-report grants + upload + admin viewer against the Postgres at DATABASE_URL.
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import { NextRequest } from "next/server";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.AUTH_URL ??= "http://localhost:3000";
 process.env.AUTH_SECRET ??= randomBytes(32).toString("hex");
@@ -13,7 +12,7 @@ process.env.AUTH_TRUST_HOST ??= "true";
 if (!process.env.LAUNCHER_TOKEN_SECRET || Buffer.byteLength(process.env.LAUNCHER_TOKEN_SECRET) < 32) {
   process.env.LAUNCHER_TOKEN_SECRET = randomBytes(32).toString("base64url");
 }
-const storageDir = await mkdtemp(path.join(tmpdir(), "twaz-bug-reports-test-"));
+const storageDir = await mkdtemp(path.join("/var/tmp", "twaz-bug-reports-test-"));
 process.env.BUG_REPORT_STORAGE_DIR = storageDir;
 
 const run = randomBytes(4).toString("hex");
@@ -26,6 +25,10 @@ const { signAccessToken } = await import("@/lib/launcher/jwt");
 const { bugReportGrantAccountKey } = await import("@/lib/rate-limit");
 const { REPORTS_PER_HOUR } = await import("@/lib/bug-reports");
 const { sweepExpiredBugReports } = await import("@/lib/bug-report-sweep");
+const {
+  STORAGE_CHECK_RETRY_AFTER_SEC, bugReportStorageBannerText, resetBugReportStorageCheck,
+} = await import("@/lib/bug-report-storage");
+const { register } = await import("@/instrumentation");
 const grants = await import("@/app/api/bug-reports/grants/route");
 const uploads = await import("@/app/api/bug-reports/route");
 const replayRoute = await import("@/app/api/admin/bug-reports/[id]/replay/route");
@@ -402,5 +405,103 @@ describe("retention sweep", () => {
     expect(result.deleted).toBeGreaterThanOrEqual(1);
     expect(await prisma.bugReport.findUnique({ where: { id } })).toBeNull();
     expect(await prisma.bugReport.findUnique({ where: { id: fresh.id } })).not.toBeNull();
+  });
+});
+
+describe("storage availability fail-safe", () => {
+  const blocked = path.join("/var/tmp", `twaz-br-int-blocked-${run}`);
+  let failUser: User;
+  let reportId: string;
+  let unusedToken: string;
+  const prevSecret = process.env.LAUNCHER_TOKEN_SECRET;
+
+  beforeAll(async () => {
+    await writeFile(blocked, "not-a-dir");
+    failUser = await makeUser({ label: "failsafe" });
+    const minted = await mint(failUser);
+    const created = await uploadReq(minted.uploadToken, formFrom(reportPayload()));
+    expect(created.status).toBe(201);
+    reportId = (await created.json() as { id: string }).id;
+    unusedToken = (await mint(failUser)).uploadToken;
+  });
+
+  afterEach(() => {
+    resetBugReportStorageCheck();
+    process.env.BUG_REPORT_STORAGE_DIR = storageDir;
+    if (prevSecret && Buffer.byteLength(prevSecret) >= 32) process.env.LAUNCHER_TOKEN_SECRET = prevSecret;
+  });
+
+  afterAll(async () => {
+    await rm(blocked, { force: true });
+  });
+
+  async function setStorage(kind: "ok" | "unset" | "under_tmp" | "not_writable") {
+    resetBugReportStorageCheck();
+    if (kind === "ok") process.env.BUG_REPORT_STORAGE_DIR = storageDir;
+    else if (kind === "unset") delete process.env.BUG_REPORT_STORAGE_DIR;
+    else if (kind === "under_tmp") process.env.BUG_REPORT_STORAGE_DIR = `/tmp/twaz-br-int-${run}`;
+    else process.env.BUG_REPORT_STORAGE_DIR = blocked;
+  }
+
+  async function expect503(res: Response) {
+    expect(res.status).toBe(503);
+    expect(res.headers.get("retry-after")).toBe(String(STORAGE_CHECK_RETRY_AFTER_SEC));
+    await expect(res.json()).resolves.toEqual({ error: "bug_reports_unavailable" });
+  }
+
+  it("boots and serves grants when the dir is writable, with no admin banner", async () => {
+    process.env.LAUNCHER_TOKEN_SECRET = process.env.LAUNCHER_TOKEN_SECRET && Buffer.byteLength(process.env.LAUNCHER_TOKEN_SECRET) >= 32
+      ? process.env.LAUNCHER_TOKEN_SECRET
+      : "a".repeat(32);
+    await setStorage("ok");
+    await expect(register()).resolves.toBeUndefined();
+    const res = await grantReq(failUser.token);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { uploadToken: string };
+    expect(body.uploadToken.length).toBeGreaterThan(20);
+    const row = await prisma.bugReportGrant.findUnique({ where: { tokenHash: sha256(body.uploadToken) } });
+    expect(row?.userId).toBe(failUser.id);
+    actor = admin.id;
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const list = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({}) }));
+    expect(list).not.toContain("isn't configured");
+  });
+
+  it.each([
+    ["unset", "unset"],
+    ["under_tmp", "under_tmp"],
+    ["not_writable", "not_writable"],
+  ] as const)("%s: boots, returns 503 without minting or consuming, and shows the admin banner", async (kind, reason) => {
+    process.env.LAUNCHER_TOKEN_SECRET = process.env.LAUNCHER_TOKEN_SECRET && Buffer.byteLength(process.env.LAUNCHER_TOKEN_SECRET) >= 32
+      ? process.env.LAUNCHER_TOKEN_SECRET
+      : "a".repeat(32);
+    await setStorage(kind);
+    await expect(register()).resolves.toBeUndefined();
+
+    const before = await prisma.bugReportGrant.count({ where: { userId: failUser.id } });
+    await expect503(await grantReq(failUser.token));
+    expect(await prisma.bugReportGrant.count({ where: { userId: failUser.id } })).toBe(before);
+
+    await expect503(await uploadReq(unusedToken, formFrom(reportPayload())));
+    const unused = await prisma.bugReportGrant.findUnique({ where: { tokenHash: sha256(unusedToken) } });
+    expect(unused?.usedAt).toBeNull();
+
+    actor = admin.id;
+    const replay = await replayRoute.GET(new NextRequest(new URL(`/api/admin/bug-reports/${reportId}/replay`, BASE)), { params: Promise.resolve({ id: reportId }) });
+    await expect503(replay);
+    const shot = await shotRoute.GET(new NextRequest(new URL(`/api/admin/bug-reports/${reportId}/screenshots/0`, BASE)), { params: Promise.resolve({ id: reportId, index: "0" }) });
+    await expect503(shot);
+
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const banner = bugReportStorageBannerText(reason).replaceAll("'", "&#x27;");
+    const list = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({}) }));
+    expect(list).toContain(banner);
+    expect(list).toContain("role=\"alert\"");
+    const detail = renderToStaticMarkup(await DetailPage({ params: Promise.resolve({ id: reportId }) }));
+    expect(detail).toContain(banner);
+    expect(detail).toContain(reportId);
+
+    const swept = await sweepExpiredBugReports();
+    expect(swept).toMatchObject({ deleted: 0, skipped: true });
   });
 });

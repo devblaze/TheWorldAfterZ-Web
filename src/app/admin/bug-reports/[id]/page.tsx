@@ -4,8 +4,9 @@ import { prisma } from "@/lib/db";
 import { displayName } from "@/lib/crypto";
 import { emailFor } from "@/lib/moderation";
 import { requireBugReportsPage } from "@/lib/session";
-import { buttonSecondary } from "@/components/ui";
+import { Notice, buttonSecondary } from "@/components/ui";
 import { REPORT_ID_RE } from "@/lib/bug-reports";
+import { bugReportStorageBannerText, checkBugReportStorage } from "@/lib/bug-report-storage";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ function MetaTable({ title, data }: { title: string; data: Record<string, unknow
 
 export default async function AdminBugReport({ params }: { params: Promise<{ id: string }> }) {
   const { standing } = await requireBugReportsPage();
+  const storage = await checkBugReportStorage();
   const { id } = await params;
   if (!REPORT_ID_RE.test(id)) notFound();
   const row = await prisma.bugReport.findUnique({
@@ -51,6 +53,7 @@ export default async function AdminBugReport({ params }: { params: Promise<{ id:
     <div className="space-y-8">
       <p className="text-sm text-stone-400"><Link className="underline" href="/admin/bug-reports">All reports</Link></p>
       <h1 className="text-2xl font-bold uppercase tracking-widest text-amber-500">Report {row.id}</h1>
+      {!storage.ok && <Notice kind="error">{bugReportStorageBannerText(storage.reason)}</Notice>}
       <p className="text-sm text-stone-400">
         {displayTime(row.createdAt)} · {row.category} · {row.netMode} · {displayName(row.userId)} · {emailFor(standing, row.user.email)}
       </p>
