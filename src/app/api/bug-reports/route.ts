@@ -9,6 +9,8 @@ import {
   isGzip, isJpeg, newReportId, readBodyCapped, reportJson, retryAfterFrom, type BugReportPayload,
 } from "@/lib/bug-reports";
 import { bugReportsUnavailableResponse, checkBugReportStorage, putBugReportBlob, removeBugReportBlob } from "@/lib/bug-report-storage";
+import { issueTitleFromReport, trackerConfig, trackerDedupeKey } from "@/lib/bug-report-tracker";
+import { kickBugReportTrackerSync } from "@/lib/bug-report-tracker-sync";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -230,7 +232,20 @@ export async function POST(req: Request) {
           meta: { hasReplay: !!replayStored, screenshotCount: shotStored.length, replayBytes: replayStored?.bytes ?? 0, netMode: p.net.mode, category: p.category },
         },
       });
+      if (trackerConfig().enabled) {
+        const title = issueTitleFromReport(p);
+        await tx.bugReportTrackerLink.create({
+          data: {
+            reportId: id,
+            dedupeKey: trackerDedupeKey(grant.userId, p.build.version, title),
+            title,
+            status: "pending",
+            nextAttemptAt: createdAt,
+          },
+        });
+      }
     });
+    kickBugReportTrackerSync();
     return reportJson({ id, createdAt: createdAt.toISOString() }, 201);
   } catch (err) {
     console.error("bug-report upload failed", err instanceof Error ? err.name : "error");

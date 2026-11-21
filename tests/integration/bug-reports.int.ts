@@ -7,6 +7,8 @@ import { NextRequest } from "next/server";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 process.env.AUTH_URL ??= "http://localhost:3000";
+// Never inherit a real SuperTracker token in tests. HTTP is mocked in the tracker suite.
+delete process.env.SUPERTRACKER_TOKEN;
 process.env.AUTH_SECRET ??= randomBytes(32).toString("hex");
 process.env.AUTH_TRUST_HOST ??= "true";
 if (!process.env.LAUNCHER_TOKEN_SECRET || Buffer.byteLength(process.env.LAUNCHER_TOKEN_SECRET) < 32) {

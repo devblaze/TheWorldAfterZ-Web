@@ -91,7 +91,7 @@ Blobs (replay + screenshots) go to a local directory via a small filesystem driv
 - While storage is unavailable, `POST /api/bug-reports/grants` and `POST /api/bug-reports` return **503** `{ "error": "bug_reports_unavailable" }` with `Retry-After` (grants are not minted; existing grants are not consumed). Admin replay/screenshot routes return the same 503. The admin list and viewer still load and show a red banner with the reason category. The daily sweep skips its run.
 - Server-generated random file names only; never a player-supplied name, never a public URL. sha256 and byte length are recorded in Postgres. An Unraid share remains out of scope.
 
-Metadata (including `logTail`, build, perf, net, session) is in Postgres (`BugReport`, `BugReportScreenshot`, `BugReportGrant`).
+Metadata (including `logTail`, build, perf, net, session) is in Postgres (`BugReport`, `BugReportScreenshot`, `BugReportGrant`, and `BugReportTrackerLink` for SuperTracker sync).
 
 ## Admin
 
@@ -102,6 +102,18 @@ Access is the **owner** (always) plus anyone with the `bugReports` GameAdmin pow
 - Fetch blobs only through authenticated routes: `GET /api/admin/bug-reports/{id}/replay` and `GET /api/admin/bug-reports/{id}/screenshots/{index}` (`bugReportsAdminOrNull`, 403 otherwise, no-store, no public object URL).
 
 The nav link is shown only when the signed-in user can access this panel. All player text is rendered as React text (escaped); the UI never uses `dangerouslySetInnerHTML`.
+
+## SuperTracker sync
+
+When a report is accepted (`POST /api/bug-reports` returns 201) and `SUPERTRACKER_TOKEN` is set, the site queues a SuperTracker issue in the same database transaction, then syncs it asynchronously (never on the player's request path).
+
+- Env: `SUPERTRACKER_TOKEN` (required to enable), `SUPERTRACKER_URL` (default `https://tracker.ncatechsolutions.org`), `SUPERTRACKER_PROJECT` (default `TWAZ`). Use a dedicated service-account token; never commit the value and never reuse a personal bot token. When the token is unset, a startup info log says the feature is disabled and reports still work. No outbox row is created in that case.
+- The issue type is `BUG` with label `in-game-report` (labels are implicit on create; there is no label-creation API).
+- Title is `[In-game] ` plus an optional `summary` or `title` field on the report JSON if present, otherwise the first line of `description`, or the first ~80 characters trimmed at a word boundary (the U13 contract has no separate summary). Capped at 255 characters.
+- The issue description includes build version (and sha/branch), server (`net.mode` plus `serverName`/`serverId` when present), the player as `Player-<8 hex>` from the account id (never the email), an optional `session.character` / `session.characterName` if the client sends one, platform/GPU, category, a link to `/admin/bug-reports/<id>` (built from `AUTH_URL`, falling back to the production site origin), and the timestamp in Europe/Athens plus ISO UTC. Player text is escaped as plain text. Logs and the opt-in replay stay in the admin panel, not in the issue body.
+- Dedupe: the same player, same build version, and same computed title within a rolling 10-minute window adds a comment (admin link + time) on the existing issue instead of opening a new one. The mapping lives in `BugReportTrackerLink` (`reportId`, `issueKey`, `dedupeKey`, `createdAt`, plus sync state).
+- Fail-soft: an in-process worker (started from `src/instrumentation.ts`, every 15 seconds, plus a kick after 201) posts via the SuperTracker MCP JSON-RPC (`POST $SUPERTRACKER_URL/api/mcp`, tools `create_issue` / `add_comment`, Bearer token). 5xx, 429, timeouts, and network errors retry with exponential backoff (15s … 1h). The row is marked `failed` after 16 attempts or 24 hours. Retries are idempotent: a stored `issueKey` is reused; they never open a second issue. The admin detail page shows the sync state and issue key.
+- HTTP calls are mocked in unit and integration tests. Tests never read a credentials file and will not call the live tracker.
 
 ## Retention
 
