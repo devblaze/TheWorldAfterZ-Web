@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "./db";
-import { canAccessPanel, loadStanding } from "./moderation";
+import { canAccessBugReports, canAccessPanel, loadStanding } from "./moderation";
 import { ipFrom } from "./rate-limit";
 
 export const clientIp = async () => ipFrom(await headers());
@@ -61,5 +61,20 @@ export async function requireModerator() {
   const user = await requireUserPage();
   const standing = await loadStanding(prisma, user);
   if (!canAccessPanel(standing)) redirect("/account");
+  return { user, standing };
+}
+
+/** For API routes: signed-in user who may view bug reports (owner, or an admin with the bugReports power), or null. */
+export async function bugReportsAdminOrNull() {
+  const user = await currentUser();
+  if (!user) return null;
+  const standing = await loadStanding(prisma, user);
+  return canAccessBugReports(standing) ? { user, standing } : null;
+}
+
+export async function requireBugReportsPage() {
+  const user = await requireUserPage();
+  const standing = await loadStanding(prisma, user);
+  if (!canAccessBugReports(standing)) redirect("/account");
   return { user, standing };
 }

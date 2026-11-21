@@ -51,7 +51,7 @@ const emails: string[] = [];
 const serverIds: string[] = [];
 const userIds: string[] = [];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const { ALL_POWERS, NO_POWERS } = mod;
+const { ALL_POWERS, NO_POWERS, gamePowers } = mod;
 type Powers = typeof ALL_POWERS;
 
 type User = { id: string; email: string; sessionId: string; token: string };
@@ -574,7 +574,7 @@ describe("GET /api/servers/{id}/admin-roster", () => {
     const expected = [
       [U.owner, "owner", ALL_POWERS], [U.env, "admin", ALL_POWERS], [U.env2, "admin", ALL_POWERS],
       [U.gaKick, "admin", { ...NO_POWERS, kick: true }], [U.gaBan, "admin", { ...NO_POWERS, ban: true }], [U.gaNone, "admin", NO_POWERS],
-    ].map(([u, role, powers]) => ({ accountId: (u as User).id, displayName: displayName((u as User).id), role, powers }))
+    ].map(([u, role, powers]) => ({ accountId: (u as User).id, displayName: displayName((u as User).id), role, powers: gamePowers(powers as typeof ALL_POWERS) }))
       .sort((a, b) => (a.accountId < b.accountId ? -1 : 1));
     expect(mine).toEqual(expected);
     for (const a of body.admins) {
@@ -609,7 +609,7 @@ describe("GET /api/servers/{id}/admin-roster", () => {
     expect(after.headers.get("etag")).not.toBe(etag);
     const body = await after.json();
     expect(body.version).toBe(v0 + 1);
-    expect(body.admins.find((a: { accountId: string }) => a.accountId === t.id)).toMatchObject({ role: "admin", powers: NO_POWERS });
+    expect(body.admins.find((a: { accountId: string }) => a.accountId === t.id)).toMatchObject({ role: "admin", powers: gamePowers(NO_POWERS) });
   });
 });
 

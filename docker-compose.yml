@@ -32,6 +32,7 @@ services:
       DOWNLOAD_SIGNING_SECRET: ${DOWNLOAD_SIGNING_SECRET:?set DOWNLOAD_SIGNING_SECRET (openssl rand -base64 32)}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-nikosantoniadis94@gmail.com}
       OWNER_EMAILS: ${OWNER_EMAILS:-nikosantoniadis94@gmail.com}
+      BUG_REPORT_STORAGE_DIR: ${BUG_REPORT_STORAGE_DIR:-/var/lib/twaz/bug-reports}
     depends_on:
       db:
         condition: service_healthy
@@ -40,6 +41,7 @@ services:
       - "${APP_BIND:-127.0.0.1:3000}:3000"
     volumes:
       - launcher:/launcher:ro
+      - bug-reports:/var/lib/twaz/bug-reports
 
 # Pinned so the network config never changes between deploys. Unpinned, EasyDeploy adds a subnet only when it creates
 # the network, so the next deploy sees a changed config, recreates the network, and fails while Traefik is attached.
@@ -53,3 +55,4 @@ networks:
 volumes:
   pgdata:
   launcher:
+  bug-reports:

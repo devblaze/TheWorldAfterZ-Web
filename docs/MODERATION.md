@@ -5,12 +5,12 @@
 | Role | Definition |
 |---|---|
 | Owner | verified email AND `User.role = ADMIN` AND email in `ADMIN_EMAILS` AND email in `OWNER_EMAILS`. Unset/empty `OWNER_EMAILS` = nobody is owner (no fallback to `ADMIN_EMAILS`). docker-compose defaults `OWNER_EMAILS` to Nick's address, mirroring the `ADMIN_EMAILS` default. |
-| Site admin | verified + `User.role = ADMIN`. Keeps `/admin/keys`, `/admin/servers`, `/admin/users` and the launcher server-admin routes exactly as before. Also a roster admin: powers come from their `GameAdmin` row if one exists, otherwise all five are true when the email is also in `ADMIN_EMAILS` (source "env"), else none. |
+| Site admin | verified + `User.role = ADMIN`. Keeps `/admin/keys`, `/admin/servers`, `/admin/users` and the launcher server-admin routes exactly as before. Also a roster admin: powers come from their `GameAdmin` row if one exists, otherwise all panel powers are true when the email is also in `ADMIN_EMAILS` (source "env"), else none. |
 | Game admin | verified account with a `GameAdmin` row (promoted in the panel). No `User.role` change: no keys/servers/users pages, no launcher admin routes. Moderation panel only. |
 
 The launcher `role` claim ("admin"|"player") is unchanged.
 
-Powers: `teleport`, `godMode`, `spawnItems`, `kick`, `ban`. The owner always has all of them.
+Powers: `teleport`, `godMode`, `spawnItems`, `kick`, `ban`, `bugReports`. The owner always has all of them. `bugReports` is a panel-only power (list, viewer, and authenticated blob routes); it is not sent to dedicated servers.
 
 | Action | Who |
 |---|---|
@@ -53,7 +53,7 @@ Versions are integers bumped in the same transaction as the change: `roster` (gl
 ```
 
 ### GET /api/servers/{id}/admin-roster
-Verified accounts only: owner (once), env admins, game admins; sorted by `accountId`; all five power keys always present.
+Verified accounts only: owner (once), env admins, game admins; sorted by `accountId`; all five in-game power keys always present (`teleport`, `godMode`, `spawnItems`, `kick`, `ban`). `bugReports` is omitted.
 ```json
 { "version": 3, "admins": [ { "accountId": "clx1abc", "displayName": "Player-1a2b3c4d", "role": "owner",
   "powers": { "teleport": true, "godMode": true, "spawnItems": true, "kick": true, "ban": true } } ] }

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "db:deploy": "prisma migrate deploy",
     "postinstall": "prisma generate",
-    "test:integration": "vitest run -c vitest.integration.config.mts"
+    "test:integration": "vitest run -c vitest.integration.config.mts",
+    "bug-reports:sweep": "node scripts/bug-reports-sweep.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

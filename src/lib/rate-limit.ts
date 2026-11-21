@@ -49,6 +49,8 @@ export const LAUNCHER_LIMITS = {
   join: { account: 10, windowMs: MIN },
   // In-game admin actions (create server, set capacity), counted before the role check.
   admin: { account: 10, windowMs: MIN },
+  // Bug-report grant minting (U13). Successful uploads are counted from BugReport rows, not here.
+  bugReportGrant: { account: 10, windowMs: HOUR },
 } as const;
 
 export const launcherTokenIpKey = (ip: string) => `launcher-token:ip:${ip}`;
@@ -113,6 +115,13 @@ export const limitLauncherJoin = (userId: string) => {
 export const limitLauncherAdmin = (userId: string) => {
   const l = LAUNCHER_LIMITS.admin;
   return rateLimit(launcherAdminAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
+};
+
+export const bugReportGrantAccountKey = (userId: string) => `bug-report-grant:acct:${userId}`;
+
+export const limitBugReportGrant = (userId: string) => {
+  const l = LAUNCHER_LIMITS.bugReportGrant;
+  return rateLimit(bugReportGrantAccountKey(userId), l.account, l.windowMs).then((ok) => gate(ok, l.windowMs));
 };
 
 export const LIMITS = {

@@ -23,3 +23,13 @@ OWNER_EMAILS=<comma-separated owner emails>  # optional; each must also be in AD
 
 ## Cloudflare note
 Confirm EasyDeploy forwards CF-Connecting-IP or X-Forwarded-For for rate limits.
+
+## Bug reports
+
+# Required in production. Must not resolve under /tmp (the process refuses to start if it does).
+# docker-compose.yml mounts the named volume `bug-reports` at /var/lib/twaz/bug-reports and defaults this path.
+# A merge to main auto-deploys, and still needs Nick's verbatim go.
+BUG_REPORT_STORAGE_DIR=/var/lib/twaz/bug-reports
+# Optional; default 90. The app also runs the 90-day sweep once a day in-process.
+# Manual: `docker compose exec app npm run bug-reports:sweep`
+BUG_REPORT_RETENTION_DAYS=90
