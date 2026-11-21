@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { displayName } from "../src/lib/crypto";
 import {
-  ALL_POWERS, NO_POWERS, banActive, banExpiry, banExpiryFromMinutes, canAccessPanel, canBan, canDemote, canKick, canPromote,
-  canSeeEmails, canSetPowers, computeStanding, maskEmail, type Standing,
+  ALL_POWERS, NO_POWERS, banActive, banExpiry, banExpiryFromMinutes, canAccessBugReports, canAccessPanel, canBan, canDemote, canKick, canPromote,
+  canSeeEmails, canSetPowers, computeStanding, gamePowers, maskEmail, type Standing,
 } from "../src/lib/moderation";
 import { parseEmailList } from "../src/lib/admin";
 import { AckRequest, ServerBanRequest } from "../src/lib/servers";
@@ -144,5 +144,23 @@ describe("bans", () => {
     expect(ServerBanRequest.safeParse({ ...ok, durationMinutes: 525_600 }).success).toBe(true);
     expect(AckRequest.safeParse({ result: "done" }).success).toBe(true);
     for (const bad of [{ result: "ok" }, {}, { result: "done", x: 1 }]) expect(AckRequest.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe("bugReports panel power", () => {
+  it("is on for the owner and for env admins with no row, off by default otherwise", () => {
+    expect(canAccessBugReports(st("o", "boss@x.test", { role: "ADMIN" }))).toBe(true);
+    expect(canAccessBugReports(st("a", "ops@x.test", { role: "ADMIN" }))).toBe(true);
+    expect(canAccessBugReports(st("s", "site@x.test", { role: "ADMIN" }))).toBe(false);
+    expect(canAccessBugReports(st("g", "g@x.test", {}, { bugReports: true }))).toBe(true);
+    expect(canAccessBugReports(st("g", "g@x.test", {}, { kick: true }))).toBe(false);
+    expect(ALL_POWERS.bugReports).toBe(true);
+    expect(NO_POWERS.bugReports).toBe(false);
+  });
+
+  it("omits bugReports from the in-game roster payload", () => {
+    expect(Object.keys(gamePowers(ALL_POWERS)).sort()).toEqual(["ban", "godMode", "kick", "spawnItems", "teleport"]);
+    expect(gamePowers(ALL_POWERS).ban).toBe(true);
+    expect("bugReports" in gamePowers(NO_POWERS)).toBe(false);
   });
 });

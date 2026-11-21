@@ -5,4 +5,10 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "edge") return;
   const { launcherTokenSecret } = await import("./lib/env");
   launcherTokenSecret();
+  const { assertBugReportStorage } = await import("./lib/bug-report-storage");
+  assertBugReportStorage();
+  if (process.env.VITEST) return;
+  const { sweepExpiredBugReports } = await import("./lib/bug-report-sweep");
+  const { startBugReportSweepScheduler } = await import("./lib/bug-report-sweep-schedule");
+  startBugReportSweepScheduler({ sweep: sweepExpiredBugReports });
 }

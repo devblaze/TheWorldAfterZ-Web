@@ -86,41 +86,34 @@ Other methods: 405. CSRF: both paths are exempt in `src/proxy.ts` (launcher/game
 
 Blobs (replay + screenshots) go to a local directory via a small filesystem driver (`src/lib/bug-report-storage.ts`):
 
-- `BUG_REPORT_STORAGE_DIR` — default `/tmp/twaz-bug-reports` (local/CI). Server-generated random file names only; never a player-supplied name, never a public URL.
-- sha256 and byte length are recorded in Postgres.
-
-The intended production store is Nick's Unraid share `\\192.168.4.253\grokbot`, mounted on the EasyDeploy host if that host can reach it, and pointed at with `BUG_REPORT_STORAGE_DIR`. **This PR does not change Docker, compose, or EasyDeploy config for that mount.** If the host cannot mount the share, use a local volume and set the env var to that path when Nick approves a deploy. See also the open questions below.
+- `BUG_REPORT_STORAGE_DIR` is required in production. There is no `/tmp` default. At process start (`src/instrumentation.ts`), if `NODE_ENV=production` and the variable is unset or resolves under `/tmp`, the process refuses to start.
+- docker-compose sets `BUG_REPORT_STORAGE_DIR` to `/var/lib/twaz/bug-reports` and mounts the named volume `bug-reports` there (the compose network/subnet is unchanged). Local and CI tests set the variable to a throwaway directory.
+- Server-generated random file names only; never a player-supplied name, never a public URL. sha256 and byte length are recorded in Postgres.
 
 Metadata (including `logTail`, build, perf, net, session) is in Postgres (`BugReport`, `BugReportScreenshot`, `BugReportGrant`).
 
 ## Admin
 
-Site admins (`User.role = ADMIN`, which includes owners listed in `OWNER_EMAILS`) can:
+Access is the **owner** (always) plus anyone with the `bugReports` GameAdmin power (camelCase, default `false`, toggled by the owner on `/admin/moderation` like the other powers). Env admins with no `GameAdmin` row still get all powers, including `bugReports`, matching the existing convention. The dedicated-server roster still exposes only the five in-game powers; `bugReports` is not sent to game servers.
 
-- List `/admin/bug-reports`, filtered by category, `net.mode`, build version/family, and server id/name. Rows are tagged with `net.mode`.
-- View `/admin/bug-reports/[id]`: description, metadata, log tail, screenshots, and a replay download.
-- Fetch blobs only through authenticated routes: `GET /api/admin/bug-reports/{id}/replay` and `GET /api/admin/bug-reports/{id}/screenshots/{index}` (`adminOrNull`, 403 otherwise, no-store, no public object URL).
+- List `/admin/bug-reports`, filtered by category, `net.mode`, build version/family, and server id/name. Rows are tagged with `net.mode`. Listen and direct reports are accepted and tagged the same way.
+- View `/admin/bug-reports/[id]`: description, metadata, log tail, screenshots, and a replay download. Site admins and the owner see full emails; game admins with the power see the usual masked address.
+- Fetch blobs only through authenticated routes: `GET /api/admin/bug-reports/{id}/replay` and `GET /api/admin/bug-reports/{id}/screenshots/{index}` (`bugReportsAdminOrNull`, 403 otherwise, no-store, no public object URL).
 
-Game-only moderators do not get this panel (replays and logs are sensitive). All player text is rendered as React text (escaped); the UI never uses `dangerouslySetInnerHTML`.
+The nav link is shown only when the signed-in user can access this panel. All player text is rendered as React text (escaped); the UI never uses `dangerouslySetInnerHTML`.
 
 ## Retention
 
-Reports are kept for **90 days**. `npm run bug-reports:sweep` (`scripts/bug-reports-sweep.mjs`) deletes rows older than 90 days (override with `BUG_REPORT_RETENTION_DAYS`) and their blobs, then unused grants that expired more than a day ago. Run it from cron or by hand on the app host; it is not scheduled by this PR. Nothing is auto-deleted until that job runs.
+Reports are kept for **90 days**. The running app starts a once-per-process daily sweep (`src/instrumentation.ts` → `startBugReportSweepScheduler`): one immediate run after start, then every 24 hours, with a guard so two sweeps never overlap, logging only the deleted-report / blob / expired-grant counts. `npm run bug-reports:sweep` (`scripts/bug-reports-sweep.mjs`) remains for a manual run (requires `BUG_REPORT_STORAGE_DIR`). Override the window with `BUG_REPORT_RETENTION_DAYS`.
 
 ## Open questions
 
-For Unity:
+For Unity (unchanged):
 
 - Confirm this matches the payload they will ship (field names, `logTail` object shape, `perf.frameMsAvg` / `frameMsMax` rather than `frameMsP95`, screenshot part name `screenshots[]`, gzip content type).
 - Confirm they can POST multipart and that the launcher will call `/api/bug-reports/grants` then hand only `uploadToken` + `expiresAt` (and the upload URL) to the game.
 - Any extra replay-header fields to freeze now for a later staff playback viewer?
 
-For Lead / Nick:
-
-- Storage location: can the EasyDeploy host mount `\\192.168.4.253\grokbot`? If yes, set `BUG_REPORT_STORAGE_DIR` to the mount path at deploy time (no compose change in this PR). If not, use a local volume path.
-- 90-day retention and who runs the sweep.
-- Admin access is site admins (and therefore owners). Should it be owner-only?
-- The grant route also requires a verified email and an active key. Should listen/direct (or menu) reports be allowed without a key?
-- Should listen/direct reports be accepted at all, or official + menu (`net.mode=none`) only?
+Lead decisions already applied: persistent named Docker volume (not `/tmp`, Unraid mount out of scope); in-process daily 90-day sweep (manual script kept); access is the owner plus the `bugReports` power; grants still require an active key; listen/direct reports are accepted and tagged; grant minting stays 10/hour.
 
 Do not merge this PR without Nick's go-ahead: merging `main` auto-deploys production.

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { canAccessPanel, loadStanding } from "@/lib/moderation";
+import { canAccessBugReports, canAccessPanel, loadStanding } from "@/lib/moderation";
 import { currentUser } from "@/lib/session";
 import "./globals.css";
 
@@ -14,7 +14,9 @@ export const metadata: Metadata = {
 // Reading the session makes every page dynamic, which the per-request CSP nonce requires.
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const user = await currentUser();
-  const moderator = !!user && canAccessPanel(await loadStanding(prisma, user));
+  const standing = user ? await loadStanding(prisma, user) : null;
+  const moderator = !!standing && canAccessPanel(standing);
+  const bugReports = !!standing && canAccessBugReports(standing);
   const link = "hover:text-amber-500";
   return (
     <html lang="en">
@@ -34,9 +36,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     <Link className={link} href="/admin/keys">Keys</Link>
                     <Link className={link} href="/admin/users">Users</Link>
                     <Link className={link} href="/admin/servers">Servers</Link>
-                    <Link className={link} href="/admin/bug-reports">Bug reports</Link>
                   </>
                 )}
+                {bugReports && <Link className={link} href="/admin/bug-reports">Bug reports</Link>}
                 {moderator && <Link className={link} href="/admin/moderation">Moderation</Link>}
                 <Link className={link} href="/logout">Logout</Link>
               </>

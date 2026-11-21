@@ -12,11 +12,19 @@ export const MODERATION_AUDIT = {
   commandAcked: "COMMAND_ACKED",
 } as const;
 
-export const POWER_KEYS = ["teleport", "godMode", "spawnItems", "kick", "ban"] as const;
+export const GAME_POWER_KEYS = ["teleport", "godMode", "spawnItems", "kick", "ban"] as const;
+export const POWER_KEYS = [...GAME_POWER_KEYS, "bugReports"] as const;
+export type GamePower = (typeof GAME_POWER_KEYS)[number];
 export type Power = (typeof POWER_KEYS)[number];
+export type GamePowers = Record<GamePower, boolean>;
 export type Powers = Record<Power, boolean>;
-export const ALL_POWERS: Powers = { teleport: true, godMode: true, spawnItems: true, kick: true, ban: true };
-export const NO_POWERS: Powers = { teleport: false, godMode: false, spawnItems: false, kick: false, ban: false };
+export const ALL_POWERS: Powers = { teleport: true, godMode: true, spawnItems: true, kick: true, ban: true, bugReports: true };
+export const NO_POWERS: Powers = { teleport: false, godMode: false, spawnItems: false, kick: false, ban: false, bugReports: false };
+
+/** In-game roster payload: the original five keys only. `bugReports` is a panel power and is never sent to dedicated servers. */
+export const gamePowers = (p: Powers): GamePowers => ({
+  teleport: p.teleport, godMode: p.godMode, spawnItems: p.spawnItems, kick: p.kick, ban: p.ban,
+});
 
 export const KICK_TTL_MS = 5 * 60_000;
 export const BAN_MAX_REASON = 200;
@@ -48,6 +56,7 @@ export const pickPowers = (row: PowerRow | null | undefined): Powers => ({
   spawnItems: row?.spawnItems === true,
   kick: row?.kick === true,
   ban: row?.ban === true,
+  bugReports: row?.bugReports === true,
 });
 
 /**
@@ -100,6 +109,8 @@ export const canSetPowers = (a: Standing, t: Standing) => a.level === "owner" &&
 const targetable = (a: Standing, t: Standing) => a.id !== t.id && t.level !== "owner" && (!adminish(t) || a.level === "owner");
 export const canKick = (a: Standing, t: Standing) => a.powers.kick && targetable(a, t);
 export const canBan = (a: Standing, t: Standing) => a.powers.ban && targetable(a, t);
+/** Owner always has this (ALL_POWERS). Everyone else needs the `bugReports` power. */
+export const canAccessBugReports = (a: Standing) => a.powers.bugReports === true;
 
 /** Full address for site admins and the owner, `n***@domain` for everyone else. */
 export function maskEmail(email: string): string {
@@ -154,7 +165,7 @@ const audit = (tx: Db, action: string, actorId: string | null, targetId: string,
   tx.auditLog.create({ data: { actorId, action, targetId, meta } });
 
 // ---- Roster ----
-export type RosterEntry = { accountId: string; displayName: string; role: "owner" | "admin"; powers: Powers };
+export type RosterEntry = { accountId: string; displayName: string; role: "owner" | "admin"; powers: GamePowers };
 
 /** Verified accounts on the roster: the owner, env admins, game admins. Same computation the in-game ban check uses. */
 export async function rosterUsers(tx: Db) {
@@ -171,7 +182,7 @@ export async function rosterUsers(tx: Db) {
 
 /** Sorted by accountId; the owner appears once. */
 export async function rosterEntries(tx: Db): Promise<RosterEntry[]> {
-  return (await rosterUsers(tx)).map(({ u, s }) => ({ accountId: u.id, displayName: displayName(u.id), role: s.level === "owner" ? ("owner" as const) : ("admin" as const), powers: s.powers }));
+  return (await rosterUsers(tx)).map(({ u, s }) => ({ accountId: u.id, displayName: displayName(u.id), role: s.level === "owner" ? ("owner" as const) : ("admin" as const), powers: gamePowers(s.powers) }));
 }
 
 export async function pendingCommands(tx: Db, serverId: string, now = new Date()) {

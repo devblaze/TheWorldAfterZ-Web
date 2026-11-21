@@ -40,11 +40,14 @@ const userIds: string[] = [];
 
 type User = { id: string; email: string; token: string };
 
-async function makeUser(opts: { role?: "ADMIN" | "PLAYER"; verified?: boolean; key?: "ACTIVE" | "REVOKED" | null; label?: string } = {}): Promise<User> {
+async function makeUser(opts: { role?: "ADMIN" | "PLAYER"; verified?: boolean; key?: "ACTIVE" | "REVOKED" | null; label?: string; bugReports?: boolean } = {}): Promise<User> {
   const email = `${opts.label ?? "p"}-${run}-${emails.length}@example.test`;
   emails.push(email);
   const user = await prisma.user.create({
-    data: { email, passwordHash: "x", role: opts.role ?? "PLAYER", emailVerifiedAt: opts.verified === false ? null : new Date() },
+    data: {
+      email, passwordHash: "x", role: opts.role ?? "PLAYER", emailVerifiedAt: opts.verified === false ? null : new Date(),
+      ...(opts.bugReports ? { gameAdmin: { create: { bugReports: true } } } : {}),
+    },
   });
   userIds.push(user.id);
   if (opts.key !== null) {
@@ -132,10 +135,18 @@ async function mint(user: User) {
 
 let player: User;
 let admin: User;
+let site: User;
+let owner: User;
+let gaViewer: User;
 
 beforeAll(async () => {
   player = await makeUser({ label: "player" });
-  admin = await makeUser({ label: "admin", role: "ADMIN" });
+  admin = await makeUser({ label: "admin", role: "ADMIN", bugReports: true });
+  site = await makeUser({ label: "site", role: "ADMIN" });
+  owner = await makeUser({ label: "owner", role: "ADMIN" });
+  gaViewer = await makeUser({ label: "gaviewer", bugReports: true });
+  process.env.ADMIN_EMAILS = owner.email;
+  process.env.OWNER_EMAILS = owner.email;
 });
 beforeEach(async () => {
   await resetLimits();
@@ -321,7 +332,7 @@ describe("POST /api/bug-reports", () => {
 });
 
 describe("admin panel", () => {
-  it("lists and shows reports for site admins, filters by category, and escapes player text", async () => {
+  it("lists and shows reports for the owner and bugReports holders, filters by category, and escapes player text", async () => {
     const xss = `<script>alert(1)</script> door bug ${run}`;
     const { uploadToken } = await mint(player);
     const created = await uploadReq(uploadToken, formFrom(reportPayload({ category: "crash", description: xss, net: { ...reportPayload().net, mode: "listen", serverId: "", serverName: "" } })));
@@ -330,9 +341,15 @@ describe("admin panel", () => {
 
     const { renderToStaticMarkup } = await import("react-dom/server");
     const emptySp = { searchParams: Promise.resolve({}) };
+    const replayReq = () => replayRoute.GET(new NextRequest(new URL(`/api/admin/bug-reports/${id}/replay`, BASE)), { params: Promise.resolve({ id }) });
 
     actor = player.id;
     await expect(ListPage(emptySp)).rejects.toThrow();
+    expect((await replayReq()).status).toBe(403);
+
+    actor = site.id; // site admin, no bugReports power
+    await expect(ListPage(emptySp)).rejects.toThrow();
+    expect((await replayReq()).status).toBe(403);
 
     actor = admin.id;
     const list = renderToStaticMarkup(await ListPage(emptySp));
@@ -342,6 +359,7 @@ describe("admin panel", () => {
     expect(list).toContain(displayName(player.id));
     expect(list).toContain(player.email);
     expect(list).not.toMatch(/<script>alert\(1\)<\/script>/);
+    expect((await replayReq()).status).toBe(200);
 
     const filtered = renderToStaticMarkup(await ListPage({ searchParams: Promise.resolve({ category: "ui" }) }));
     expect(filtered).not.toContain(id);
@@ -351,6 +369,19 @@ describe("admin panel", () => {
     expect(detail).not.toMatch(/<script>alert\(1\)<\/script>/);
     expect(detail).toContain("listen");
     expect(detail).toContain(player.email);
+
+    actor = owner.id;
+    expect(renderToStaticMarkup(await ListPage(emptySp))).toContain(id);
+    expect(renderToStaticMarkup(await ListPage(emptySp))).toContain(player.email);
+    expect((await replayReq()).status).toBe(200);
+
+    actor = gaViewer.id;
+    const gaList = renderToStaticMarkup(await ListPage(emptySp));
+    expect(gaList).toContain(id);
+    expect(gaList).toContain(displayName(player.id));
+    expect(gaList).not.toContain(player.email);
+    expect(gaList).toContain(`${player.email[0]}***${player.email.slice(player.email.indexOf("@"))}`);
+    expect((await replayReq()).status).toBe(200);
   });
 });
 

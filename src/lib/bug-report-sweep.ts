@@ -32,3 +32,5 @@ export async function sweepExpiredBugReports(now = new Date(), days = RETENTION_
   });
   return { deleted, removedBlobs, expiredGrants: grants.count };
 }
+
+export type SweepResult = Awaited<ReturnType<typeof sweepExpiredBugReports>>;

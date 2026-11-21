@@ -10,7 +10,11 @@ if (!Number.isFinite(DAYS) || DAYS < 1) {
   console.error("BUG_REPORT_RETENTION_DAYS must be a positive number");
   process.exit(1);
 }
-const dir = (process.env.BUG_REPORT_STORAGE_DIR ?? "/tmp/twaz-bug-reports").trim();
+const dir = (process.env.BUG_REPORT_STORAGE_DIR ?? "").trim();
+if (!dir) {
+  console.error("BUG_REPORT_STORAGE_DIR must be set");
+  process.exit(1);
+}
 const cutoff = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000);
 const grantCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 const KEY_RE = /^[a-zA-Z0-9]{16,128}\.[a-z0-9]{1,16}$/;

@@ -1,15 +1,49 @@
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256Bytes } from "./bug-reports";
 
 const KEY_RE = /^[a-zA-Z0-9]{16,128}\.[a-z0-9]{1,16}$/;
+const TMP_ROOT = path.resolve("/tmp");
 
 export type StoredBlob = { key: string; sha256: string; bytes: number };
 
-export function bugReportStorageDir() {
-  const raw = process.env.BUG_REPORT_STORAGE_DIR?.trim();
-  return raw && raw.length > 0 ? raw : "/tmp/twaz-bug-reports";
+export type StorageEnv = { NODE_ENV?: string; BUG_REPORT_STORAGE_DIR?: string };
+
+/** Resolve a configured storage directory. Does not default to /tmp. */
+export function resolveBugReportStorageDir(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const resolved = path.resolve(value);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+export function isUnderTmp(dir: string): boolean {
+  const resolved = path.resolve(dir);
+  return resolved === TMP_ROOT || resolved.startsWith(TMP_ROOT + path.sep);
+}
+
+/**
+ * Production must set BUG_REPORT_STORAGE_DIR to a durable path that does not resolve under /tmp.
+ * Skipped when NODE_ENV is not "production" so local/CI can use a throwaway directory.
+ */
+export function assertBugReportStorage(env: StorageEnv = process.env): void {
+  if (env.NODE_ENV !== "production") return;
+  const resolved = resolveBugReportStorageDir(env.BUG_REPORT_STORAGE_DIR);
+  if (!resolved || isUnderTmp(resolved)) {
+    throw new Error("BUG_REPORT_STORAGE_DIR must be set in production and must not resolve under /tmp");
+  }
+}
+
+export function bugReportStorageDir(env: StorageEnv = process.env) {
+  const resolved = resolveBugReportStorageDir(env.BUG_REPORT_STORAGE_DIR);
+  if (!resolved) throw new Error("BUG_REPORT_STORAGE_DIR is not set");
+  return resolved;
 }
 
 function assertKey(key: string) {
@@ -18,9 +52,9 @@ function assertKey(key: string) {
 
 function resolveKey(key: string) {
   assertKey(key);
-  const root = path.resolve(bugReportStorageDir());
-  const full = path.resolve(root, key);
-  if (full !== path.join(root, key)) throw new Error("invalid storage key");
+  const root = path.resolve(/*turbopackIgnore: true*/ bugReportStorageDir());
+  const full = path.resolve(/*turbopackIgnore: true*/ root, key);
+  if (full !== path.join(/*turbopackIgnore: true*/ root, key)) throw new Error("invalid storage key");
   return full;
 }
 
@@ -40,7 +74,7 @@ export async function putBugReportBlob(bytes: Buffer, ext: string): Promise<Stor
 
 export async function getBugReportBlob(key: string): Promise<Buffer | null> {
   try {
-    return await readFile(resolveKey(key));
+    return await readFile(/*turbopackIgnore: true*/ resolveKey(key));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;

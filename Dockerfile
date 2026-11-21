@@ -19,7 +19,7 @@ FROM base AS runner
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0 LAUNCHER_DIR=/launcher
 # Prisma CLI for `migrate deploy` at start (the standalone bundle only has the client).
 RUN npm install -g prisma@6.19.3 && npm cache clean --force
-RUN groupadd --system --gid 1001 app && useradd --system --uid 1001 --gid app app && mkdir -p /launcher /tmp/twaz-launcher-cache && chown app:app /launcher /tmp/twaz-launcher-cache
+RUN groupadd --system --gid 1001 app && useradd --system --uid 1001 --gid app app && mkdir -p /launcher /tmp/twaz-launcher-cache /var/lib/twaz/bug-reports && chown app:app /launcher /tmp/twaz-launcher-cache /var/lib/twaz/bug-reports
 COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
 # standalone server.js serves public/ only if it sits next to it (screenshots, next/image sources).

@@ -7,7 +7,8 @@ import {
   BugReportBody, GRANT_TTL_SEC_MAX, GrantRequest, REPORT_ID_RE, REQUEST_MAX_BYTES,
   findForbiddenReportContent, isGzip, isJpeg, newReportId, readBodyCapped, retryAfterFrom,
 } from "../src/lib/bug-reports";
-import { getBugReportBlob, putBugReportBlob, removeBugReportBlob } from "../src/lib/bug-report-storage";
+import { assertBugReportStorage, bugReportStorageDir, getBugReportBlob, isUnderTmp, putBugReportBlob, removeBugReportBlob } from "../src/lib/bug-report-storage";
+import { resetBugReportSweepScheduler, runBugReportSweepGuarded, startBugReportSweepScheduler } from "../src/lib/bug-report-sweep-schedule";
 
 const valid = {
   schemaVersion: 1 as const,
@@ -124,5 +125,69 @@ describe("filesystem storage", () => {
     expect(await getBugReportBlob(put.key)).toBeNull();
     const leftover = await readFile(path.join(dir, put.key)).catch((e: NodeJS.ErrnoException) => e.code);
     expect(leftover).toBe("ENOENT");
+  });
+});
+
+describe("production storage dir", () => {
+  it("treats /tmp and its children as forbidden, but not /var/tmp or a similarly prefixed path", () => {
+    expect(isUnderTmp("/tmp")).toBe(true);
+    expect(isUnderTmp("/tmp/twaz-bug-reports")).toBe(true);
+    expect(isUnderTmp("/tmp/foo/../foo")).toBe(true);
+    expect(isUnderTmp("/var/lib/twaz/bug-reports")).toBe(false);
+    expect(isUnderTmp("/var/tmp/bugs")).toBe(false);
+    expect(isUnderTmp("/tmpfoo")).toBe(false);
+  });
+
+  it("fails production startup when the dir is missing or under /tmp, and allows a durable path", () => {
+    expect(() => assertBugReportStorage({ NODE_ENV: "production" })).toThrow(/BUG_REPORT_STORAGE_DIR/);
+    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: " " })).toThrow(/BUG_REPORT_STORAGE_DIR/);
+    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: "/tmp" })).toThrow(/under \/tmp/);
+    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: "/tmp/bugs" })).toThrow(/under \/tmp/);
+    expect(() => assertBugReportStorage({ NODE_ENV: "production", BUG_REPORT_STORAGE_DIR: "/var/lib/twaz/bug-reports" })).not.toThrow();
+    expect(() => assertBugReportStorage({ NODE_ENV: "test" })).not.toThrow();
+  });
+
+  it("does not fall back to /tmp when the variable is unset", () => {
+    const prev = process.env.BUG_REPORT_STORAGE_DIR;
+    delete process.env.BUG_REPORT_STORAGE_DIR;
+    expect(() => bugReportStorageDir()).toThrow(/BUG_REPORT_STORAGE_DIR is not set/);
+    if (prev === undefined) delete process.env.BUG_REPORT_STORAGE_DIR;
+    else process.env.BUG_REPORT_STORAGE_DIR = prev;
+  });
+});
+
+describe("in-process daily sweep guard", () => {
+  const result = { deleted: 1, removedBlobs: 2, expiredGrants: 3 };
+
+  afterEach(() => {
+    resetBugReportSweepScheduler();
+  });
+
+  it("runs once when two calls overlap, then allows a later run", async () => {
+    let started = 0;
+    let release!: (value: typeof result) => void;
+    const sweep = () => {
+      started += 1;
+      return new Promise<typeof result>((resolve) => { release = resolve; });
+    };
+    const first = runBugReportSweepGuarded(sweep);
+    const second = runBugReportSweepGuarded(sweep);
+    expect(started).toBe(1);
+    release(result);
+    await expect(first).resolves.toEqual({ ran: true, result });
+    await expect(second).resolves.toEqual({ ran: false });
+    await expect(runBugReportSweepGuarded(async () => result)).resolves.toEqual({ ran: true, result });
+  });
+
+  it("starts the scheduler only once per process", async () => {
+    let n = 0;
+    const sweep = async () => {
+      n += 1;
+      return result;
+    };
+    startBugReportSweepScheduler({ sweep, intervalMs: 60_000, startNow: true });
+    startBugReportSweepScheduler({ sweep, intervalMs: 60_000, startNow: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(n).toBe(1);
   });
 });

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { input, one, type SearchParams } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import { displayName } from "@/lib/crypto";
-import { requireAdminPage } from "@/lib/session";
+import { emailFor } from "@/lib/moderation";
+import { requireBugReportsPage } from "@/lib/session";
 import { CATEGORIES, NET_MODES } from "@/lib/bug-reports";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ const displayTime = (date: Date) => new Intl.DateTimeFormat("en-GB", {
 }).format(date) + " (Athens)";
 
 export default async function AdminBugReports({ searchParams }: { searchParams: SearchParams }) {
-  await requireAdminPage();
+  const { standing } = await requireBugReportsPage();
   const sp = await searchParams;
   const category = one(sp.category)?.trim() ?? "";
   const build = one(sp.build)?.trim() ?? "";
@@ -82,7 +83,7 @@ export default async function AdminBugReports({ searchParams }: { searchParams: 
                 </td>
                 <td>
                   <div>{displayName(r.userId)}</div>
-                  <div className="text-xs text-stone-400">{r.user.email}</div>
+                  <div className="text-xs text-stone-400">{emailFor(standing, r.user.email)}</div>
                 </td>
                 <td>
                   {r.includeReplay ? "replay" : "no replay"}
