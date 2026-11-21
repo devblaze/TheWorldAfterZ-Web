@@ -34,6 +34,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                     <Link className={link} href="/admin/keys">Keys</Link>
                     <Link className={link} href="/admin/users">Users</Link>
                     <Link className={link} href="/admin/servers">Servers</Link>
+                    <Link className={link} href="/admin/bug-reports">Bug reports</Link>
                   </>
                 )}
                 {moderator && <Link className={link} href="/admin/moderation">Moderation</Link>}

@@ -49,6 +49,8 @@ Unit tests (`npm test`) need no database.
 | `LAUNCHER_FEED_URL` | Optional http(s) base URL ending in `/`; empty/unset disables feed lookup |
 | `LAUNCHER_CACHE_DIR` | Writable verified-object cache; default `/tmp/twaz-launcher-cache` (app-owned in Docker) |
 | `LAUNCHER_DIR` | Directory with `manifest.json` and the launcher file (`/launcher` in Docker) |
+| `BUG_REPORT_STORAGE_DIR` | Directory for private bug-report blobs (replays, screenshots). Default `/tmp/twaz-bug-reports`. See [docs/BUG_REPORTS.md](docs/BUG_REPORTS.md). |
+| `BUG_REPORT_RETENTION_DAYS` | Optional override for `npm run bug-reports:sweep` (default 90) |
 
 ## Migrations
 

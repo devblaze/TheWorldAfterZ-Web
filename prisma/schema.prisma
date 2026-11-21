@@ -45,6 +45,8 @@ model User {
   serverSessions      ServerSession[]
   gameAdmin           GameAdmin?
   bans                PlayerBan[]
+  bugReports          BugReport[]
+  bugReportGrants     BugReportGrant[]
 }
 
 model AccessKey {
@@ -334,3 +336,72 @@ model ModerationCounter {
   key   String @id
   value Int    @default(0)
 }
+
+// One-time upload grant for POST /api/bug-reports. Only the sha256 of the token is stored.
+model BugReportGrant {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// In-game bug report. accountId is userId from the grant; blobs live on disk, not in this row.
+model BugReport {
+  id                String   @id // br_… site-issued
+  schemaVersion     Int
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category          String
+  description       String
+  includeReplay     Boolean
+  clientSubmittedAt DateTime
+  buildVersion      String
+  buildFamily       String
+  buildSha          String
+  buildBranch       String
+  buildDate         String
+  platform          Json
+  gpu               Json
+  perf              Json
+  net               Json
+  netMode           String
+  serverId          String?
+  serverName        String?
+  session           Json
+  logTail           Json
+  replayKey         String?
+  replaySha256      String?
+  replayBytes       Int?
+  replayContentType String?
+  createdAt         DateTime @default(now())
+
+  screenshots BugReportScreenshot[]
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([category])
+  @@index([buildFamily])
+  @@index([buildVersion])
+  @@index([serverId])
+  @@index([netMode])
+}
+
+model BugReportScreenshot {
+  id          String    @id @default(cuid())
+  reportId    String
+  report      BugReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  index       Int
+  storageKey  String
+  sha256      String
+  bytes       Int
+  contentType String    @default("image/jpeg")
+
+  @@unique([reportId, index])
+}
+
