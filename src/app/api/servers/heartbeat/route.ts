@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 import { counters } from "@/lib/moderation";
 import { methodNotAllowed, launcherJson as noStoreJson, readJsonBody } from "@/lib/launcher/http";
 import { rateLimit, retryAfterSeconds } from "@/lib/rate-limit";
-import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches, SERVER_AUDIT, syncedHeartbeatGameBuild } from "@/lib/servers";
+import { decideHeartbeatBuild, Heartbeat, HEARTBEAT_LIMIT, heartbeatKey, parseServerAuth, secretMatches, SERVER_AUDIT, syncedHeartbeatGameBuild, updaterColumns } from "@/lib/servers";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -59,6 +59,8 @@ export async function POST(req: Request) {
           serverRuntime: b.server_runtime,
           players: b.players,
           maxPlayers: b.maxPlayers,
+          // Absent updater = old build: cleared, so a stale halt banner does not linger.
+          ...updaterColumns(b.updater, now),
           // Absent list = leave it alone, except a restart: the old process's list is stale.
           ...(b.playerAccountIds ? { onlinePlayerIds: b.playerAccountIds, onlinePlayersAt: now } : restarted ? { onlinePlayerIds: [], onlinePlayersAt: null } : {}),
           ...(decision.kind === "adopt"

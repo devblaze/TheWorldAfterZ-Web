@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { requireAdminPage } from "@/lib/session";
 import { adminListStatus, adminListStatusClass } from "@/lib/servers";
+import { UpdaterHaltBanner } from "@/components/updater-halt";
 import { CreateServerForm, ServerActions } from "./ServerForms";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default async function AdminServers() {
       id: true, name: true, region: true, host: true, port: true, status: true, gameBuild: true, buildFamily: true,
       protocolVersion: true, clientPlatforms: true, lastHeartbeatAt: true, players: true, maxPlayers: true, adminMaxPlayers: true,
       reportedGameBuild: true, serverRuntime: true, secretRotatedAt: true,
+      updaterState: true, updaterReason: true, updaterReportedAt: true,
     },
     orderBy: { createdAt: "desc" },
     take: 200,
@@ -53,6 +55,7 @@ export default async function AdminServers() {
                       ) : (
                         <div className="text-xs text-amber-400">no secret yet: generate one below to let it heartbeat</div>
                       )}
+                      <UpdaterHaltBanner server={s} />
                     </td>
                     <td className={adminListStatusClass[status]}>{status}</td>
                     <td className="text-stone-400">

@@ -1,10 +1,12 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { Notice, button, buttonDanger, buttonSecondary, input, one, type SearchParams } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import { POWER_KEYS, emailFor, rosterUsers } from "@/lib/moderation";
 import { requireModerator } from "@/lib/session";
 import { adminListStatus, adminListStatusClass } from "@/lib/servers";
 import { displayName } from "@/lib/crypto";
+import { UpdaterHaltBanner } from "@/components/updater-halt";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,8 @@ export default async function Moderation({ searchParams }: { searchParams: Searc
     rosterUsers(prisma),
     prisma.officialServer.findMany({
       where: { status: "ACTIVE" },
-      select: { id: true, name: true, region: true, status: true, lastHeartbeatAt: true, players: true, adminMaxPlayers: true },
+      select: { id: true, name: true, region: true, status: true, lastHeartbeatAt: true, players: true, adminMaxPlayers: true,
+        updaterState: true, updaterReason: true, updaterReportedAt: true },
       orderBy: { createdAt: "desc" },
       take: 200,
     }),
@@ -101,13 +104,21 @@ export default async function Moderation({ searchParams }: { searchParams: Searc
           <tbody>
             {servers.map((s) => {
               const status = adminListStatus(s, now);
+              const halted = s.updaterState === "halted";
               return (
-                <tr key={s.id} className="border-t border-stone-800">
-                  <td className="p-2"><div className="font-semibold">{s.name}</div><div className="text-xs text-stone-400">{s.region}</div></td>
-                  <td className={adminListStatusClass[status]}>{status}</td>
-                  <td>{s.lastHeartbeatAt ? `${s.players}/${s.adminMaxPlayers}` : "—"}</td>
-                  <td><Link className="underline" href={`/admin/moderation/servers/${s.id}`}>Players</Link></td>
-                </tr>
+                <Fragment key={s.id}>
+                  <tr className="border-t border-stone-800">
+                    <td className="p-2"><div className="font-semibold">{s.name}</div><div className="text-xs text-stone-400">{s.region}</div></td>
+                    <td className={adminListStatusClass[status]}>{status}</td>
+                    <td>{s.lastHeartbeatAt ? `${s.players}/${s.adminMaxPlayers}` : "—"}</td>
+                    <td><Link className="underline" href={`/admin/moderation/servers/${s.id}`}>Players</Link></td>
+                  </tr>
+                  {halted && (
+                    <tr data-updater-row={s.id}>
+                      <td colSpan={4} className="px-2 pb-2"><UpdaterHaltBanner server={s} /></td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>

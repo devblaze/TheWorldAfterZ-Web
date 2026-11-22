@@ -219,6 +219,9 @@ model OfficialServer {
   adminMaxPlayers   Int          @default(64) // admin-set capacity (1-64), authoritative; returned in the heartbeat 200
   onlinePlayerIds   String[]     @default([]) // account ids from the latest heartbeat that carried playerIds
   onlinePlayersAt   DateTime? // when onlinePlayerIds was last reported; the panel trusts it only within ONLINE_MS
+  updaterState      String? // last heartbeat updater.state: "ok" | "halted"; null = not reported (old build or field omitted)
+  updaterReason     String? // halted reason, one line, <= 200 chars, sanitized; shown as text in the admin panel only
+  updaterReportedAt DateTime? // when updaterState was last reported
   createdById       String?
   createdBy         User?        @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt         DateTime     @default(now())

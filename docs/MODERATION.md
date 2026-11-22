@@ -26,7 +26,7 @@ Display name: `Player-` + first 8 hex of `sha256("display:" + userId)`.
 
 ## Web panel
 
-- `/admin/moderation`: admins (powers editable by the owner), promote by exact email, servers with online counts.
+- `/admin/moderation`: admins (powers editable by the owner), promote by exact email, servers with online counts. A server whose last accepted heartbeat reported `updater.state = "halted"` gets a red banner under its row with the reason (escaped text) and the report time; `ok` or no `updater` field shows nothing. Field contract: docs/OFFICIAL_SERVERS.md, Heartbeat contract.
 - `/admin/moderation/servers/[id]`: online players (from the heartbeat `playerAccountIds`, trusted while the heartbeat is < 90 s old) with Kick and Ban forms; "admitted" = open `ServerSession` on that server.
 - `/admin/moderation/bans`: active bans, toggle for expired/revoked, unban.
 - Form POSTs to `/api/admin/moderation/...` (303 back to the page; JSON 403 `{error:"forbidden"}` when not allowed): `admins`, `admins/[userId]/demote`, `admins/[userId]/powers`, `servers/[id]/kick`, `bans`, `bans/[banId]/unban`.
@@ -89,7 +89,7 @@ The ban is global. One transaction: ban row, `bans` bump, kick commands on every
 ```
 
 ## Recommended game cadence
-- Heartbeat every 10 s (30 s also fine), including `playerAccountIds`.
+- Heartbeat every 10 s (30 s also fine), including `playerAccountIds` and `updater`.
 - After each heartbeat 200, fetch only the resource whose version changed (roster, bans, commands), and ack commands after acting.
 - Full refresh of all three every 60 s with `If-None-Match`.
 - On 429, back off for `Retry-After`.

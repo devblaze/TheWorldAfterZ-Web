@@ -86,7 +86,8 @@ Send POST `/api/servers/heartbeat` over HTTPS with
   "instance_nonce": "random-per-process-at-least-16-chars",
   "players": 0,
   "maxPlayers": 16,
-  "playerAccountIds": ["clx1abc..."]
+  "playerAccountIds": ["clx1abc..."],
+  "updater": { "state": "halted", "reason": "rollback of playtest-0.64-abc1234 was not healthy" }
 }
 ```
 
@@ -94,6 +95,24 @@ Send POST `/api/servers/heartbeat` over HTTPS with
 unique, at most 64, each `^[a-z0-9]{1,64}$`; anything else is 400. The numeric `players` stays required.
 A heartbeat without the field leaves the stored list alone, except on a nonce change (restart), which
 clears it. The moderation panel only trusts the list while the heartbeat is within 90 s.
+
+`updater` is optional: the official server's self-updater status (game PR #79,
+`docs/OFFICIAL_SERVER_UPDATER.md` in the game repo). Shapes: `{"state":"ok"}` or
+`{"state":"halted","reason":"<one line>"}`.
+- `state` must be `ok` or `halted`; any other value, a non-object, or a non-string `reason` is 400
+  `invalid_request` (like any other bad field). Unknown extra keys inside `updater` are ignored.
+- `reason` is only used when `state` is `halted`, and may be omitted (the game omits an empty
+  reason; the panel then shows "no reason reported"). The site cleans it the same way the game
+  does: CR, LF, TAB, U+2028 and U+2029 become one space, other control characters (C0, DEL, C1)
+  are dropped, it is cut to 200 UTF-16 units (never splitting a surrogate pair) and trimmed.
+  A raw `reason` over 1000 characters is 400.
+- Stored on `OfficialServer` as `updaterState`, `updaterReason` and `updaterReportedAt`
+  (accepted heartbeat time). A heartbeat **without** `updater` (older builds) is accepted and
+  clears all three, so a halt banner never outlives the process that reported it. A rejected
+  heartbeat (400/401/409/429) leaves them alone.
+- Shown only to admins: a red banner on the server's row in `/admin/moderation` and on
+  `/admin/servers`, rendered as escaped text. It is not part of the launcher directory or any
+  other public or server-facing response; the heartbeat 200 shape is unchanged.
 
 Send every 10 seconds (30 s is also fine); the limit is 12 per minute. A server is online for 90 seconds after its latest accepted heartbeat.
 Only build_family and protocol_version affect compatibility; game_build and server_runtime
