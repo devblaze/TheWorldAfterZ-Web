@@ -18,12 +18,12 @@ const features: Feature[] = [
   {
     title: "Dark nights",
     body: "Night is really dark. Lamps, fires, flashlights and lit windows are what let you see.",
-    shot: screen("street-night"),
+    shot: screen("night-flashlight-street"),
   },
   {
     title: "Health, hunger, thirst",
     body: "Keep all three up. The HUD also tracks your body temperature against how cold it feels outside.",
-    shot: screen("hud-vitals"),
+    shot: screen("hud-town-shop"),
   },
   {
     title: "Four seasons",
@@ -42,7 +42,7 @@ const features: Feature[] = [
   },
 ];
 
-const hero = screen("street-dusk");
+const hero = screen("grass-country-afternoon");
 
 export default function Home() {
   return (

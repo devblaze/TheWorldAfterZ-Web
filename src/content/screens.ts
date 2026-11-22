@@ -1,4 +1,4 @@
-// Clean marketing stills from the Unity build (Phase1 street + main menu). Files live in public/screens.
+// Clean marketing stills from the 0.73 Unity player build. Files live in public/screens.
 export type Screen = { src: string; thumb: string; alt: string; caption: string };
 
 const s = (slug: string, alt: string, caption: string): Screen => ({
@@ -10,33 +10,33 @@ const s = (slug: string, alt: string, caption: string): Screen => ({
 
 export const screens: Screen[] = [
   s(
-    "street-dusk",
-    "First-person view down a brick-lined city street at dusk, pistol raised toward silhouettes of zombies and abandoned cars in the distance, with survival vitals and a hotbar visible",
-    "Dusk on the street",
+    "grass-country-afternoon",
+    "Low view across a countryside meadow in the afternoon, with tall grass, bushes and trees under a clear blue sky",
+    "Grass in the afternoon",
   ),
   s(
-    "horde-closing",
-    "First-person view of zombies closing in mid-street at dusk, pistol in hand, with health, hunger and thirst icons in the corner",
-    "A horde closing in",
-  ),
-  s(
-    "hud-vitals",
-    "First-person view down a dusk street toward distant zombies, pistol in hand, with health, stamina, hunger, thirst and body temperature gauges and the weapon hotbar along the bottom",
+    "hud-town-shop",
+    "A brick town shop standing in open grassland at day, with the survival HUD along the bottom showing vitals and an empty hotbar, and the clock reading 14:01 Day",
     "The survival HUD",
   ),
   s(
-    "zombie-closeup",
-    "Close-up of a bald zombie in a torn dark shirt and shredded pants, lit from the side against a black background",
-    "One of the dead, up close",
+    "interior-house-b",
+    "Dim interior of a house: a stone fireplace, a doorway with a lit lantern, and a broken window looking out onto grass and trees",
+    "Inside a house",
   ),
   s(
-    "street-night",
-    "Nearly black first-person street at night lit only by a few distant orange streetlamps, survival bars and pistol ammo shown on the HUD",
-    "Night: only the lamps give light",
+    "night-flashlight-street",
+    "Night outside a brick building, a flashlight beam lighting the wall and an open doorway, with the clock showing 21:24 Night and the survival HUD visible",
+    "Night, flashlight on",
+  ),
+  s(
+    "horde-town-road",
+    "A group of zombies walking across open ground toward the camera, with town buildings and a treeline in the distance",
+    "A horde on the road",
   ),
   s(
     "main-menu",
-    "Main menu for The World After Z over a rainy, foggy city skyline, with host and join options and a playtest build tag",
+    "Main menu for The World After Z over a foggy dusk city, with Refresh, Join, Character and Quit options",
     "The main menu",
   ),
 ];
